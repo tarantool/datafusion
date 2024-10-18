@@ -1543,7 +1543,7 @@ pub fn create_window_expr(
 }
 
 type AggregateExprWithOptionalArgs = (
-    AggregateFunctionExpr,
+    Arc<AggregateFunctionExpr>,
     // The filter clause, if any
     Option<Arc<dyn PhysicalExpr>>,
     // Ordering requirements, if any
@@ -1607,7 +1607,8 @@ pub fn create_aggregate_expr_with_name_and_maybe_filter(
                         .alias(name)
                         .with_ignore_nulls(ignore_nulls)
                         .with_distinct(*distinct)
-                        .build()?;
+                        .build()
+                        .map(Arc::new)?;
 
                 (agg_expr, filter, physical_sort_exprs)
             };

@@ -122,7 +122,7 @@ async fn test_count_partial_direct_child() -> Result<()> {
     let partial_agg = AggregateExec::try_new(
         AggregateMode::Partial,
         PhysicalGroupBy::default(),
-        vec![agg.count_expr(&schema)],
+        vec![Arc::new(agg.count_expr(&schema))],
         vec![None],
         source,
         Arc::clone(&schema),
@@ -131,7 +131,7 @@ async fn test_count_partial_direct_child() -> Result<()> {
     let final_agg = AggregateExec::try_new(
         AggregateMode::Final,
         PhysicalGroupBy::default(),
-        vec![agg.count_expr(&schema)],
+        vec![Arc::new(agg.count_expr(&schema))],
         vec![None],
         Arc::new(partial_agg),
         Arc::clone(&schema),
@@ -152,7 +152,7 @@ async fn test_count_partial_with_nulls_direct_child() -> Result<()> {
     let partial_agg = AggregateExec::try_new(
         AggregateMode::Partial,
         PhysicalGroupBy::default(),
-        vec![agg.count_expr(&schema)],
+        vec![Arc::new(agg.count_expr(&schema))],
         vec![None],
         source,
         Arc::clone(&schema),
@@ -161,7 +161,7 @@ async fn test_count_partial_with_nulls_direct_child() -> Result<()> {
     let final_agg = AggregateExec::try_new(
         AggregateMode::Final,
         PhysicalGroupBy::default(),
-        vec![agg.count_expr(&schema)],
+        vec![Arc::new(agg.count_expr(&schema))],
         vec![None],
         Arc::new(partial_agg),
         Arc::clone(&schema),
@@ -181,7 +181,7 @@ async fn test_count_partial_indirect_child() -> Result<()> {
     let partial_agg = AggregateExec::try_new(
         AggregateMode::Partial,
         PhysicalGroupBy::default(),
-        vec![agg.count_expr(&schema)],
+        vec![Arc::new(agg.count_expr(&schema))],
         vec![None],
         source,
         Arc::clone(&schema),
@@ -193,7 +193,7 @@ async fn test_count_partial_indirect_child() -> Result<()> {
     let final_agg = AggregateExec::try_new(
         AggregateMode::Final,
         PhysicalGroupBy::default(),
-        vec![agg.count_expr(&schema)],
+        vec![Arc::new(agg.count_expr(&schema))],
         vec![None],
         Arc::new(coalesce),
         Arc::clone(&schema),
@@ -213,7 +213,7 @@ async fn test_count_partial_with_nulls_indirect_child() -> Result<()> {
     let partial_agg = AggregateExec::try_new(
         AggregateMode::Partial,
         PhysicalGroupBy::default(),
-        vec![agg.count_expr(&schema)],
+        vec![Arc::new(agg.count_expr(&schema))],
         vec![None],
         source,
         Arc::clone(&schema),
@@ -225,7 +225,7 @@ async fn test_count_partial_with_nulls_indirect_child() -> Result<()> {
     let final_agg = AggregateExec::try_new(
         AggregateMode::Final,
         PhysicalGroupBy::default(),
-        vec![agg.count_expr(&schema)],
+        vec![Arc::new(agg.count_expr(&schema))],
         vec![None],
         Arc::new(coalesce),
         Arc::clone(&schema),
@@ -256,7 +256,7 @@ async fn test_count_inexact_stat() -> Result<()> {
     let partial_agg = AggregateExec::try_new(
         AggregateMode::Partial,
         PhysicalGroupBy::default(),
-        vec![agg.count_expr(&schema)],
+        vec![Arc::new(agg.count_expr(&schema))],
         vec![None],
         filter,
         Arc::clone(&schema),
@@ -265,7 +265,7 @@ async fn test_count_inexact_stat() -> Result<()> {
     let final_agg = AggregateExec::try_new(
         AggregateMode::Final,
         PhysicalGroupBy::default(),
-        vec![agg.count_expr(&schema)],
+        vec![Arc::new(agg.count_expr(&schema))],
         vec![None],
         Arc::new(partial_agg),
         Arc::clone(&schema),
@@ -300,7 +300,7 @@ async fn test_count_with_nulls_inexact_stat() -> Result<()> {
     let partial_agg = AggregateExec::try_new(
         AggregateMode::Partial,
         PhysicalGroupBy::default(),
-        vec![agg.count_expr(&schema)],
+        vec![Arc::new(agg.count_expr(&schema))],
         vec![None],
         filter,
         Arc::clone(&schema),
@@ -309,7 +309,7 @@ async fn test_count_with_nulls_inexact_stat() -> Result<()> {
     let final_agg = AggregateExec::try_new(
         AggregateMode::Final,
         PhysicalGroupBy::default(),
-        vec![agg.count_expr(&schema)],
+        vec![Arc::new(agg.count_expr(&schema))],
         vec![None],
         Arc::new(partial_agg),
         Arc::clone(&schema),
