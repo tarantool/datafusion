@@ -23,8 +23,14 @@ extern crate datafusion;
 mod data_utils;
 use crate::criterion::Criterion;
 use arrow::datatypes::{DataType, Field, Fields, Schema};
+use criterion::Bencher;
 use datafusion::datasource::MemTable;
 use datafusion::execution::context::SessionContext;
+use datafusion_common::ScalarValue;
+use itertools::Itertools;
+use std::fs::File;
+use std::io::{BufRead, BufReader};
+use std::path::PathBuf;
 use std::sync::Arc;
 use test_utils::tpcds::tpcds_schemas;
 use test_utils::tpch::tpch_schemas;
@@ -87,6 +93,51 @@ fn register_defs(ctx: SessionContext, defs: Vec<TableDef>) -> SessionContext {
         .unwrap();
     });
     ctx
+}
+
+fn register_clickbench_hits_table() -> SessionContext {
+    let ctx = SessionContext::new();
+    let rt = Runtime::new().unwrap();
+
+    // use an external table for clickbench benchmarks
+    let path =
+        if PathBuf::from(format!("{BENCHMARKS_PATH_1}{CLICKBENCH_DATA_PATH}")).exists() {
+            format!("{BENCHMARKS_PATH_1}{CLICKBENCH_DATA_PATH}")
+        } else {
+            format!("{BENCHMARKS_PATH_2}{CLICKBENCH_DATA_PATH}")
+        };
+
+    let sql = format!("CREATE EXTERNAL TABLE hits STORED AS PARQUET LOCATION '{path}'");
+
+    rt.block_on(ctx.sql(&sql)).unwrap();
+
+    let count =
+        rt.block_on(async { ctx.table("hits").await.unwrap().count().await.unwrap() });
+    assert!(count > 0);
+    ctx
+}
+
+/// Target of this benchmark: control that placeholders replacing does not get slower,
+/// if the query does not contain placeholders at all.
+fn benchmark_with_param_values_many_columns(ctx: &SessionContext, b: &mut Bencher) {
+    const COLUMNS_NUM: usize = 200;
+    let mut aggregates = String::new();
+    for i in 0..COLUMNS_NUM {
+        if i > 0 {
+            aggregates.push_str(", ");
+        }
+        aggregates.push_str(format!("MAX(a{})", i).as_str());
+    }
+    // SELECT max(attr0), ..., max(attrN) FROM t1.
+    let query = format!("SELECT {} FROM t1", aggregates);
+    let statement = ctx.state().sql_to_statement(&query, "Generic").unwrap();
+    let rt = Runtime::new().unwrap();
+    let plan =
+        rt.block_on(async { ctx.state().statement_to_plan(statement).await.unwrap() });
+    b.iter(|| {
+        let plan = plan.clone();
+        criterion::black_box(plan.with_param_values(vec![ScalarValue::from(1)]).unwrap());
+    });
 }
 
 fn criterion_benchmark(c: &mut Criterion) {
@@ -233,6 +284,10 @@ fn criterion_benchmark(c: &mut Criterion) {
                 logical_plan(&tpcds_ctx, sql)
             }
         })
+    });
+
+    c.bench_function("with_param_values_many_columns", |b| {
+        benchmark_with_param_values_many_columns(&ctx, b);
     });
 }
 
