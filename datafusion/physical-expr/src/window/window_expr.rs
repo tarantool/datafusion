@@ -28,7 +28,9 @@ use arrow::compute::SortOptions;
 use arrow::datatypes::Field;
 use arrow::record_batch::RecordBatch;
 use datafusion_common::utils::compare_rows;
-use datafusion_common::{internal_err, DataFusionError, Result, ScalarValue};
+use datafusion_common::{
+    internal_err, DataFusionError, ParamValues, Result, ScalarValue,
+};
 use datafusion_expr::window_state::{
     PartitionBatchState, WindowAggState, WindowFrameContext, WindowFrameStateGroups,
 };
@@ -157,6 +159,15 @@ pub trait WindowExpr: Send + Sync + Debug {
     ) -> Option<Arc<dyn WindowExpr>> {
         None
     }
+
+    /// Resolve placeholders in this expession.
+    /// Returns [`Some`] with rewrited expression if there is
+    /// at least one placeholder.
+    /// Otherwise returns [`None`].
+    fn resolve_placeholders(
+        &self,
+        param_values: &Option<ParamValues>,
+    ) -> Result<Option<Arc<dyn WindowExpr>>>;
 }
 
 /// Stores the physical expressions used inside the `WindowExpr`.

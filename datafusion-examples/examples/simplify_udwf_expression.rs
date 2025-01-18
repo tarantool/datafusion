@@ -84,6 +84,13 @@ impl WindowUDFImpl for SimplifySmoothItUdf {
 
         Some(Box::new(simplify))
     }
+
+    fn resolve_placeholders(
+        &self,
+        _param_values: &Option<datafusion_common::ParamValues>,
+    ) -> Result<Option<std::sync::Arc<dyn WindowUDFImpl>>> {
+        Ok(None)
+    }
 }
 
 // create local execution context with `cars.csv` registered as a table named `cars`

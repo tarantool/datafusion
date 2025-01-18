@@ -2444,6 +2444,13 @@ fn roundtrip_window() {
         fn partition_evaluator(&self) -> Result<Box<dyn PartitionEvaluator>> {
             make_partition_evaluator()
         }
+
+        fn resolve_placeholders(
+            &self,
+            _param_values: &Option<datafusion_common::ParamValues>,
+        ) -> Result<Option<Arc<dyn WindowUDFImpl>>> {
+            Ok(None)
+        }
     }
 
     fn make_partition_evaluator() -> Result<Box<dyn PartitionEvaluator>> {

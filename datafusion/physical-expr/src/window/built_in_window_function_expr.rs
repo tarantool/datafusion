@@ -21,7 +21,7 @@ use arrow::array::ArrayRef;
 use arrow::datatypes::Field;
 use arrow::record_batch::RecordBatch;
 use arrow_schema::SchemaRef;
-use datafusion_common::Result;
+use datafusion_common::{ParamValues, Result};
 use datafusion_expr::PartitionEvaluator;
 
 use std::any::Any;
@@ -91,4 +91,13 @@ pub trait BuiltInWindowFunctionExpr: Send + Sync + std::fmt::Debug {
     fn get_result_ordering(&self, _schema: &SchemaRef) -> Option<PhysicalSortExpr> {
         None
     }
+
+    /// Resolve placeholders in this expession.
+    /// Returns [`Some`] with rewrited expression if there is
+    /// at least one placeholder.
+    /// Otherwise returns [`None`].
+    fn resolve_placeholders(
+        &self,
+        param_values: &Option<ParamValues>,
+    ) -> Result<Option<Arc<dyn BuiltInWindowFunctionExpr>>>;
 }

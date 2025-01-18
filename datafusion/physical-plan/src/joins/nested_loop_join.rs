@@ -317,11 +317,17 @@ impl ExecutionPlan for NestedLoopJoinExec {
             )
         });
 
+        // Resolve placeholders in filter.
+        let resolved_filter = if let Some(ref filter) = self.filter {
+            Some(filter.resolve_placeholders(context.param_values())?)
+        } else {
+            None
+        };
         let outer_table = self.right.execute(partition, context)?;
 
         Ok(Box::pin(NestedLoopJoinStream {
             schema: Arc::clone(&self.schema),
-            filter: self.filter.clone(),
+            filter: resolved_filter,
             join_type: self.join_type,
             outer_table,
             inner_table,
@@ -649,10 +655,12 @@ mod tests {
     };
 
     use arrow::datatypes::{DataType, Field};
-    use datafusion_common::{assert_batches_sorted_eq, assert_contains, ScalarValue};
+    use datafusion_common::{
+        assert_batches_sorted_eq, assert_contains, ParamValues, ScalarValue,
+    };
     use datafusion_execution::runtime_env::RuntimeEnvBuilder;
     use datafusion_expr::Operator;
-    use datafusion_physical_expr::expressions::{BinaryExpr, Literal};
+    use datafusion_physical_expr::expressions::{placeholder, BinaryExpr, Literal};
     use datafusion_physical_expr::{Partitioning, PhysicalExpr};
 
     fn build_table(
@@ -718,6 +726,40 @@ mod tests {
         // ("a2", &vec![12, 2]),
         // ("b2", &vec![10, 2]),
         // ("c2", &vec![40, 80]),
+        let filter_expression =
+            Arc::new(BinaryExpr::new(left_filter, Operator::And, right_filter))
+                as Arc<dyn PhysicalExpr>;
+
+        JoinFilter::new(filter_expression, column_indices, intermediate_schema)
+    }
+
+    fn prepare_join_filter_with_placeholders() -> JoinFilter {
+        let column_indices = vec![
+            ColumnIndex {
+                index: 1,
+                side: JoinSide::Left,
+            },
+            ColumnIndex {
+                index: 1,
+                side: JoinSide::Right,
+            },
+        ];
+        let intermediate_schema = Schema::new(vec![
+            Field::new("x", DataType::Int32, true),
+            Field::new("x", DataType::Int32, true),
+        ]);
+        // left.b1!=$left_b1
+        let left_filter = Arc::new(BinaryExpr::new(
+            Arc::new(Column::new("x", 0)),
+            Operator::NotEq,
+            placeholder("$left_b1", DataType::Int32),
+        )) as Arc<dyn PhysicalExpr>;
+        // right.b2!=$right_b2
+        let right_filter = Arc::new(BinaryExpr::new(
+            Arc::new(Column::new("x", 1)),
+            Operator::NotEq,
+            placeholder("$right_b2", DataType::Int32),
+        )) as Arc<dyn PhysicalExpr>;
         let filter_expression =
             Arc::new(BinaryExpr::new(left_filter, Operator::And, right_filter))
                 as Arc<dyn PhysicalExpr>;
@@ -1047,6 +1089,38 @@ mod tests {
             );
         }
 
+        Ok(())
+    }
+
+    #[tokio::test]
+    async fn join_with_placeholders() -> Result<()> {
+        let left = build_left_table();
+        let right = build_right_table();
+        let filter = prepare_join_filter_with_placeholders();
+        let params = ParamValues::Map(std::collections::HashMap::from([
+            ("left_b1".into(), ScalarValue::Int32(Some(8))),
+            ("right_b2".into(), ScalarValue::Int32(Some(10))),
+        ]));
+        let task_ctx = Arc::new(TaskContext::default().with_param_values(params));
+        let (columns, batches) = multi_partitioned_join_collect(
+            left,
+            right,
+            &JoinType::Inner,
+            Some(filter),
+            task_ctx,
+        )
+        .await?;
+
+        assert_eq!(columns, vec!["a1", "b1", "c1", "a2", "b2", "c2"]);
+        let expected = [
+            "+----+----+----+----+----+----+",
+            "| a1 | b1 | c1 | a2 | b2 | c2 |",
+            "+----+----+----+----+----+----+",
+            "| 5  | 5  | 50 | 2  | 2  | 80 |",
+            "+----+----+----+----+----+----+",
+        ];
+
+        assert_batches_sorted_eq!(expected, &batches);
         Ok(())
     }
 

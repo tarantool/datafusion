@@ -33,6 +33,7 @@ use crate::{
 use datafusion_common::{internal_err, Result};
 use datafusion_execution::memory_pool::MemoryConsumer;
 use datafusion_execution::TaskContext;
+use datafusion_physical_expr::expressions::resolve_placeholders;
 use datafusion_physical_expr::PhysicalSortRequirement;
 
 use datafusion_physical_expr_common::sort_expr::LexRequirement;
@@ -268,10 +269,24 @@ impl ExecutionPlan for SortPreservingMergeExec {
 
                 debug!("Done setting up sender-receiver for SortPreservingMergeExec::execute");
 
+                // Resolve placeholders for sort expressions.
+                let expr = self
+                    .expr
+                    .iter()
+                    .map(|pe| {
+                        let (resolved, _) =
+                            resolve_placeholders(&pe.expr, context.param_values())?;
+                        Ok(PhysicalSortExpr {
+                            expr: resolved,
+                            options: pe.options.clone(),
+                        })
+                    })
+                    .collect::<Result<Vec<_>>>()?;
+
                 let result = streaming_merge(
                     receivers,
                     schema,
-                    &self.expr,
+                    &expr,
                     BaselineMetrics::new(&self.metrics, partition),
                     context.session_config().batch_size(),
                     self.fetch,

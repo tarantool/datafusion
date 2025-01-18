@@ -43,11 +43,11 @@ use datafusion_common::cast::as_boolean_array;
 use datafusion_common::stats::Precision;
 use datafusion_common::tree_node::{Transformed, TransformedResult, TreeNode};
 use datafusion_common::{
-    plan_err, DataFusionError, JoinSide, JoinType, Result, SharedResult,
+    plan_err, DataFusionError, JoinSide, JoinType, ParamValues, Result, SharedResult,
 };
 use datafusion_expr::interval_arithmetic::Interval;
 use datafusion_physical_expr::equivalence::add_offset_to_expr;
-use datafusion_physical_expr::expressions::Column;
+use datafusion_physical_expr::expressions::{resolve_placeholders, Column};
 use datafusion_physical_expr::utils::{collect_columns, merge_vectors};
 use datafusion_physical_expr::{
     LexOrdering, LexOrderingRef, PhysicalExpr, PhysicalExprRef, PhysicalSortExpr,
@@ -602,6 +602,19 @@ impl JoinFilter {
     /// Intermediate batch schema
     pub fn schema(&self) -> &Schema {
         &self.schema
+    }
+
+    /// Resolve placeholders of physical expressions.
+    pub fn resolve_placeholders(
+        &self,
+        param_values: &Option<ParamValues>,
+    ) -> Result<Self> {
+        let (resolved, _) = resolve_placeholders(&self.expression, param_values)?;
+        Ok(Self {
+            expression: resolved,
+            column_indices: self.column_indices.clone(),
+            schema: self.schema.clone(),
+        })
     }
 }
 

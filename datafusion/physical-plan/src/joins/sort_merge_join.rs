@@ -339,6 +339,8 @@ impl ExecutionPlan for SortMergeJoinExec {
                  consider using RepartitionExec"
             );
         }
+        // No need to resolve placeholders in `on` expressions because
+        // they must be columns.
         let (on_left, on_right) = self.on.iter().cloned().unzip();
         let (streamed, buffered, on_streamed, on_buffered) =
             if SortMergeJoinExec::probe_side(&self.join_type) == JoinSide::Left {
@@ -368,6 +370,13 @@ impl ExecutionPlan for SortMergeJoinExec {
         let reservation = MemoryConsumer::new(format!("SMJStream[{partition}]"))
             .register(context.memory_pool());
 
+        // Resolve placeholders in filter.
+        let resolved_filter = if let Some(ref filter) = self.filter {
+            Some(filter.resolve_placeholders(context.param_values())?)
+        } else {
+            None
+        };
+
         // create join stream
         Ok(Box::pin(SMJStream::try_new(
             Arc::clone(&self.schema),
@@ -377,7 +386,7 @@ impl ExecutionPlan for SortMergeJoinExec {
             buffered,
             on_streamed,
             on_buffered,
-            self.filter.clone(),
+            resolved_filter,
             self.join_type,
             batch_size,
             SortMergeJoinMetrics::new(partition, &self.metrics),

@@ -467,6 +467,8 @@ impl ExecutionPlan for SymmetricHashJoinExec {
         }
         // If `filter_state` and `filter` are both present, then calculate sorted filter expressions
         // for both sides, and build an expression graph.
+        // No need to resolve placeholders in `on` expressions because
+        // they must be columns.
         let (left_sorted_filter_expr, right_sorted_filter_expr, graph) =
             match (&self.left_sort_exprs, &self.right_sort_exprs, &self.filter) {
                 (Some(left_sort_exprs), Some(right_sort_exprs), Some(filter)) => {
@@ -501,12 +503,18 @@ impl ExecutionPlan for SymmetricHashJoinExec {
         if let Some(g) = graph.as_ref() {
             reservation.lock().try_grow(g.size())?;
         }
+        // Resolve placeholders in filter.
+        let resolved_filter = if let Some(ref filter) = self.filter {
+            Some(filter.resolve_placeholders(context.param_values())?)
+        } else {
+            None
+        };
 
         Ok(Box::pin(SymmetricHashJoinStream {
             left_stream,
             right_stream,
             schema: self.schema(),
-            filter: self.filter.clone(),
+            filter: resolved_filter,
             join_type: self.join_type,
             random_state: self.random_state.clone(),
             left: left_side_joiner,

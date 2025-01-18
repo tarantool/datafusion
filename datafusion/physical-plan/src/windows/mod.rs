@@ -37,8 +37,11 @@ use datafusion_expr::{
     BuiltInWindowFunction, PartitionEvaluator, WindowFrame, WindowFunctionDefinition,
     WindowUDF,
 };
-use datafusion_physical_expr::aggregate::{AggregateExprBuilder, AggregateFunctionExpr};
 use datafusion_physical_expr::equivalence::collapse_lex_req;
+use datafusion_physical_expr::{
+    aggregate::{AggregateExprBuilder, AggregateFunctionExpr},
+    expressions::resolve_placeholders_seq,
+};
 use datafusion_physical_expr::{
     reverse_order_bys,
     window::{BuiltInWindowFunctionExpr, SlidingAggregateWindowExpr},
@@ -393,6 +396,26 @@ impl BuiltInWindowFunctionExpr for WindowUDFExpr {
                 let expr = Arc::new(Column::new(field.name(), idx));
                 PhysicalSortExpr { expr, options }
             })
+    }
+
+    fn resolve_placeholders(
+        &self,
+        param_values: &Option<datafusion_common::ParamValues>,
+    ) -> Result<Option<Arc<dyn BuiltInWindowFunctionExpr>>> {
+        let fun = self.fun.inner().resolve_placeholders(param_values)?;
+        let args = resolve_placeholders_seq(&self.args, param_values)?;
+        Ok(if fun.is_some() || args.is_some() {
+            Some(Arc::new(Self {
+                fun: fun
+                    .map(|f| Arc::new(WindowUDF::new_from_arc_impl(f)))
+                    .unwrap_or_else(|| Arc::clone(&self.fun)),
+                args: args.unwrap_or_else(|| self.args.clone()),
+                name: self.name.clone(),
+                data_type: self.data_type.clone(),
+            }))
+        } else {
+            None
+        })
     }
 }
 

@@ -25,10 +25,12 @@ use arrow::array::{Array, ArrayRef};
 use arrow::datatypes::Field;
 use arrow::record_batch::RecordBatch;
 
-use datafusion_common::{Result, ScalarValue};
+use datafusion_common::{ParamValues, Result, ScalarValue};
 use datafusion_expr::{Accumulator, WindowFrame};
 
 use crate::aggregate::AggregateFunctionExpr;
+use crate::expressions::resolve_placeholders_seq;
+use crate::window::aggregate::resolve_physical_sort_placeholders;
 use crate::window::window_expr::AggregateWindowExpr;
 use crate::window::{
     PartitionBatches, PartitionWindowAggStates, PlainAggregateWindowExpr, WindowExpr,
@@ -167,6 +169,28 @@ impl WindowExpr for SlidingAggregateWindowExpr {
             order_by: new_order_by,
             window_frame: Arc::clone(&self.window_frame),
         }))
+    }
+
+    fn resolve_placeholders(
+        &self,
+        param_values: &Option<ParamValues>,
+    ) -> Result<Option<Arc<dyn WindowExpr>>> {
+        let aggregate = self.aggregate.resolve_placeholders(param_values)?;
+        let ordery_by = resolve_physical_sort_placeholders(&self.order_by, param_values)?;
+        let partition_by = resolve_placeholders_seq(&self.partition_by, param_values)?;
+        Ok(
+            if aggregate.is_some() || ordery_by.is_some() || partition_by.is_some() {
+                Some(Arc::new(Self {
+                    aggregate: aggregate.unwrap_or_else(|| Arc::clone(&self.aggregate)),
+                    partition_by: partition_by
+                        .unwrap_or_else(|| self.partition_by.clone()),
+                    order_by: ordery_by.unwrap_or_else(|| self.order_by.clone()),
+                    window_frame: self.window_frame.clone(),
+                }))
+            } else {
+                None
+            },
+        )
     }
 }
 

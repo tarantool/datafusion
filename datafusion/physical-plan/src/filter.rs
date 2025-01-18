@@ -41,7 +41,7 @@ use datafusion_common::{
 use datafusion_execution::TaskContext;
 use datafusion_expr::Operator;
 use datafusion_physical_expr::equivalence::ProjectionMapping;
-use datafusion_physical_expr::expressions::BinaryExpr;
+use datafusion_physical_expr::expressions::{resolve_placeholders, BinaryExpr};
 use datafusion_physical_expr::intervals::utils::check_support;
 use datafusion_physical_expr::utils::collect_columns;
 use datafusion_physical_expr::{
@@ -354,9 +354,11 @@ impl ExecutionPlan for FilterExec {
     ) -> Result<SendableRecordBatchStream> {
         trace!("Start FilterExec::execute for partition {} of context session_id {} and task_id {:?}", partition, context.session_id(), context.task_id());
         let baseline_metrics = BaselineMetrics::new(&self.metrics, partition);
+        let (predicate, _) =
+            resolve_placeholders(&self.predicate, context.param_values())?;
         Ok(Box::pin(FilterExecStream {
             schema: self.schema(),
-            predicate: Arc::clone(&self.predicate),
+            predicate: predicate,
             input: self.input.execute(partition, context)?,
             baseline_metrics,
             projection: self.projection.clone(),
