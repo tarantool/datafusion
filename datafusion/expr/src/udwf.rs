@@ -27,7 +27,7 @@ use std::{
     sync::Arc,
 };
 
-use datafusion_common::{not_impl_err, Result};
+use datafusion_common::{not_impl_err, ParamValues, Result};
 
 use crate::expr::WindowFunction;
 use crate::{
@@ -107,9 +107,12 @@ impl WindowUDF {
     where
         F: WindowUDFImpl + 'static,
     {
-        Self {
-            inner: Arc::new(fun),
-        }
+        Self::new_from_arc_impl(Arc::new(fun))
+    }
+
+    /// Createa a new `WindowUDF` from a dyn `[WindowUDFImpl`].
+    pub fn new_from_arc_impl(fun: Arc<dyn WindowUDFImpl>) -> Self {
+        Self { inner: fun }
     }
 
     /// Return the underlying [`WindowUDFImpl`] trait object for this function
@@ -220,9 +223,10 @@ where
 /// [`advanced_udwf.rs`]: https://github.com/apache/datafusion/blob/main/datafusion-examples/examples/advanced_udwf.rs
 /// # Basic Example
 /// ```
+/// # use std::sync::Arc;
 /// # use std::any::Any;
 /// # use arrow::datatypes::DataType;
-/// # use datafusion_common::{DataFusionError, plan_err, Result};
+/// # use datafusion_common::{DataFusionError, plan_err, Result, ParamValues};
 /// # use datafusion_expr::{col, Signature, Volatility, PartitionEvaluator, WindowFrame, ExprFunctionExt};
 /// # use datafusion_expr::{WindowUDFImpl, WindowUDF};
 /// #[derive(Debug, Clone)]
@@ -251,6 +255,13 @@ where
 ///    }
 ///    // The actual implementation would add one to the argument
 ///    fn partition_evaluator(&self) -> Result<Box<dyn PartitionEvaluator>> { unimplemented!() }
+///
+///    fn resolve_placeholders(
+///        &self,
+///        param_values: &Option<ParamValues>,
+///    ) -> Result<Option<Arc<dyn WindowUDFImpl>>> {
+///        Ok(None)
+///    }
 /// }
 ///
 /// // Create a new WindowUDF from the implementation
@@ -384,6 +395,15 @@ pub trait WindowUDFImpl: Debug + Send + Sync {
     fn coerce_types(&self, _arg_types: &[DataType]) -> Result<Vec<DataType>> {
         not_impl_err!("Function {} does not implement coerce_types", self.name())
     }
+
+    /// Resolve placeholders in this expession.
+    /// Returns [`Some`] with rewrited expression if there is
+    /// at least one placeholder.
+    /// Otherwise returns [`None`].
+    fn resolve_placeholders(
+        &self,
+        param_values: &Option<ParamValues>,
+    ) -> Result<Option<Arc<dyn WindowUDFImpl>>>;
 }
 
 impl PartialEq for dyn WindowUDFImpl {
@@ -476,6 +496,21 @@ impl WindowUDFImpl for AliasedWindowUDFImpl {
     fn coerce_types(&self, arg_types: &[DataType]) -> Result<Vec<DataType>> {
         self.inner.coerce_types(arg_types)
     }
+
+    fn resolve_placeholders(
+        &self,
+        param_values: &Option<ParamValues>,
+    ) -> Result<Option<Arc<dyn WindowUDFImpl>>> {
+        let inner = self.inner.resolve_placeholders(param_values)?;
+        Ok(if let Some(inner) = inner {
+            Some(Arc::new(Self {
+                inner: inner,
+                aliases: self.aliases.clone(),
+            }))
+        } else {
+            None
+        })
+    }
 }
 
 /// Implementation of [`WindowUDFImpl`] that wraps the function style pointers
@@ -525,6 +560,13 @@ impl WindowUDFImpl for WindowUDFLegacyWrapper {
     fn partition_evaluator(&self) -> Result<Box<dyn PartitionEvaluator>> {
         (self.partition_evaluator_factory)()
     }
+
+    fn resolve_placeholders(
+        &self,
+        _param_values: &Option<ParamValues>,
+    ) -> Result<Option<Arc<dyn WindowUDFImpl>>> {
+        Ok(None)
+    }
 }
 
 #[cfg(test)]
@@ -570,6 +612,12 @@ mod test {
         fn partition_evaluator(&self) -> Result<Box<dyn PartitionEvaluator>> {
             unimplemented!()
         }
+        fn resolve_placeholders(
+            &self,
+            _param_values: &Option<datafusion_common::ParamValues>,
+        ) -> Result<Option<std::sync::Arc<dyn WindowUDFImpl>>> {
+            Ok(None)
+        }
     }
 
     #[derive(Debug, Clone)]
@@ -605,6 +653,12 @@ mod test {
         }
         fn partition_evaluator(&self) -> Result<Box<dyn PartitionEvaluator>> {
             unimplemented!()
+        }
+        fn resolve_placeholders(
+            &self,
+            _param_values: &Option<datafusion_common::ParamValues>,
+        ) -> Result<Option<std::sync::Arc<dyn WindowUDFImpl>>> {
+            Ok(None)
         }
     }
 

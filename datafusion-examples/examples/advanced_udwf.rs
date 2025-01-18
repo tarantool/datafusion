@@ -80,6 +80,13 @@ impl WindowUDFImpl for SmoothItUdf {
     fn partition_evaluator(&self) -> Result<Box<dyn PartitionEvaluator>> {
         Ok(Box::new(MyPartitionEvaluator::new()))
     }
+
+    fn resolve_placeholders(
+        &self,
+        _param_values: &Option<datafusion_common::ParamValues>,
+    ) -> Result<Option<std::sync::Arc<dyn WindowUDFImpl>>> {
+        Ok(None)
+    }
 }
 
 /// This implements the lowest level evaluation for a window function

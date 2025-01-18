@@ -26,7 +26,7 @@ use crate::{
     registry::FunctionRegistry,
     runtime_env::{RuntimeEnv, RuntimeEnvBuilder},
 };
-use datafusion_common::{plan_datafusion_err, DataFusionError, Result};
+use datafusion_common::{plan_datafusion_err, DataFusionError, ParamValues, Result};
 use datafusion_expr::planner::ExprPlanner;
 use datafusion_expr::{AggregateUDF, ScalarUDF, WindowUDF};
 
@@ -53,6 +53,8 @@ pub struct TaskContext {
     window_functions: HashMap<String, Arc<WindowUDF>>,
     /// Runtime environment associated with this task context
     runtime: Arc<RuntimeEnv>,
+    /// Param values for physical placeholders.
+    param_values: Option<ParamValues>,
 }
 
 impl Default for TaskContext {
@@ -70,6 +72,7 @@ impl Default for TaskContext {
             aggregate_functions: HashMap::new(),
             window_functions: HashMap::new(),
             runtime,
+            param_values: None,
         }
     }
 }
@@ -97,6 +100,7 @@ impl TaskContext {
             aggregate_functions,
             window_functions,
             runtime,
+            param_values: None,
         }
     }
 
@@ -123,6 +127,17 @@ impl TaskContext {
     /// Return the [RuntimeEnv] associated with this [TaskContext]
     pub fn runtime_env(&self) -> Arc<RuntimeEnv> {
         Arc::clone(&self.runtime)
+    }
+
+    /// Return param values associated with thix [`TaskContext`].
+    pub fn param_values(&self) -> &Option<ParamValues> {
+        &self.param_values
+    }
+
+    /// Update the param values.
+    pub fn with_param_values(mut self, param_values: ParamValues) -> Self {
+        self.param_values = Some(param_values);
+        self
     }
 
     /// Update the [`SessionConfig`]

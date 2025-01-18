@@ -51,6 +51,7 @@ use datafusion_execution::disk_manager::RefCountedTempFile;
 use datafusion_execution::memory_pool::{MemoryConsumer, MemoryReservation};
 use datafusion_execution::runtime_env::RuntimeEnv;
 use datafusion_execution::TaskContext;
+use datafusion_physical_expr::expressions::resolve_placeholders;
 use datafusion_physical_expr::LexOrdering;
 use datafusion_physical_expr_common::sort_expr::PhysicalSortRequirement;
 
@@ -898,6 +899,20 @@ impl ExecutionPlan for SortExec {
                 PhysicalSortRequirement::from_sort_exprs(self.expr.iter()).as_slice(),
             );
 
+        // Resolve placeholders for sort expressions.
+        let expr = self
+            .expr
+            .iter()
+            .map(|pe| {
+                let (resolved, _) =
+                    resolve_placeholders(&pe.expr, context.param_values())?;
+                Ok(PhysicalSortExpr {
+                    expr: resolved,
+                    options: pe.options.clone(),
+                })
+            })
+            .collect::<Result<_>>()?;
+
         match (sort_satisfied, self.fetch.as_ref()) {
             (true, Some(fetch)) => Ok(Box::pin(LimitStream::new(
                 input,
@@ -910,7 +925,7 @@ impl ExecutionPlan for SortExec {
                 let mut topk = TopK::try_new(
                     partition,
                     input.schema(),
-                    self.expr.clone(),
+                    expr,
                     *fetch,
                     context.session_config().batch_size(),
                     context.runtime_env(),
@@ -933,7 +948,7 @@ impl ExecutionPlan for SortExec {
                 let mut sorter = ExternalSorter::new(
                     partition,
                     input.schema(),
-                    self.expr.clone(),
+                    expr,
                     context.session_config().batch_size(),
                     self.fetch,
                     execution_options.sort_spill_reservation_bytes,
@@ -992,11 +1007,12 @@ mod tests {
     use arrow::compute::SortOptions;
     use arrow::datatypes::*;
     use datafusion_common::cast::as_primitive_array;
-    use datafusion_common::{assert_batches_eq, Result, ScalarValue};
+    use datafusion_common::{assert_batches_eq, ParamValues, Result, ScalarValue};
     use datafusion_execution::config::SessionConfig;
     use datafusion_execution::runtime_env::RuntimeEnvBuilder;
     use datafusion_execution::RecordBatchStream;
-    use datafusion_physical_expr::expressions::{Column, Literal};
+    use datafusion_expr::Operator;
+    use datafusion_physical_expr::expressions::{binary, placeholder, Column, Literal};
     use datafusion_physical_expr::EquivalenceProperties;
 
     use futures::{FutureExt, Stream};
@@ -1585,6 +1601,55 @@ mod tests {
             "| 8  |",
             "+----+",];
         assert_batches_eq!(expected, &batches);
+        Ok(())
+    }
+
+    #[tokio::test]
+    async fn sort_with_placeholders() -> Result<()> {
+        let schema =
+            Arc::new(Schema::new(vec![Field::new("c1", DataType::Int32, false)]));
+        let source = Arc::new(MemoryExec::try_new(
+            &[vec![RecordBatch::try_new(
+                Arc::clone(&schema),
+                vec![Arc::new(Int32Array::from(vec![1, 2, 3, 4]))],
+            )?]],
+            Arc::clone(&schema),
+            None,
+        )?);
+
+        let plan = SortExec::new(
+            vec![PhysicalSortExpr {
+                expr: binary(
+                    col("c1", &schema)?,
+                    Operator::Multiply,
+                    placeholder("$a", DataType::Int32),
+                    &schema,
+                )?,
+                options: SortOptions {
+                    descending: false,
+                    nulls_first: false,
+                },
+            }],
+            source,
+        );
+
+        let ctx = TaskContext::default().with_param_values(ParamValues::Map(
+            [("a".to_owned(), ScalarValue::Int32(Some(-1)))].into(),
+        ));
+        let batches = collect(Arc::new(plan), Arc::new(ctx)).await?;
+
+        #[rustfmt::skip]
+        let expected = [
+            "+----+",
+            "| c1 |",
+            "+----+",
+            "| 4  |",
+            "| 3  |",
+            "| 2  |",
+            "| 1  |",
+            "+----+",];
+        assert_batches_eq!(expected, &batches);
+
         Ok(())
     }
 }

@@ -229,10 +229,20 @@ impl ExecutionPlan for WindowAggExec {
         partition: usize,
         context: Arc<TaskContext>,
     ) -> Result<SendableRecordBatchStream> {
+        let param_values = context.param_values();
+        // Resolve placeholders in window expressions.
+        let window_expr = self
+            .window_expr
+            .iter()
+            .map(|e| {
+                Ok(e.resolve_placeholders(param_values)?
+                    .unwrap_or_else(|| Arc::clone(&e)))
+            })
+            .collect::<Result<_>>()?;
         let input = self.input.execute(partition, context)?;
         let stream = Box::pin(WindowAggStream::new(
             Arc::clone(&self.schema),
-            self.window_expr.clone(),
+            window_expr,
             input,
             BaselineMetrics::new(&self.metrics, partition),
             self.partition_by_sort_keys()?,

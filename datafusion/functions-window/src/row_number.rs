@@ -102,6 +102,13 @@ impl WindowUDFImpl for RowNumber {
             nulls_first: false,
         })
     }
+
+    fn resolve_placeholders(
+        &self,
+        _param_values: &Option<datafusion_common::ParamValues>,
+    ) -> Result<Option<std::sync::Arc<dyn WindowUDFImpl>>> {
+        Ok(None)
+    }
 }
 
 /// State for the `row_number` built-in window function.

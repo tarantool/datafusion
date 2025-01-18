@@ -19,22 +19,25 @@
 
 use crate::aggregates::topk::priority_map::PriorityMap;
 use crate::aggregates::{
-    aggregate_expressions, evaluate_group_by, evaluate_many, AggregateExec,
-    PhysicalGroupBy,
+    aggregate_expressions, evaluate_group_by, evaluate_many, PhysicalGroupBy,
 };
-use crate::{RecordBatchStream, SendableRecordBatchStream};
+use crate::{ExecutionPlan, RecordBatchStream, SendableRecordBatchStream};
 use arrow::util::pretty::print_batches;
 use arrow_array::{Array, ArrayRef, RecordBatch};
 use arrow_schema::SchemaRef;
 use datafusion_common::DataFusionError;
 use datafusion_common::Result;
 use datafusion_execution::TaskContext;
+use datafusion_physical_expr::aggregate::AggregateFunctionExpr;
 use datafusion_physical_expr::PhysicalExpr;
 use futures::stream::{Stream, StreamExt};
+use itertools::Itertools;
 use log::{trace, Level};
 use std::pin::Pin;
 use std::sync::Arc;
 use std::task::{Context, Poll};
+
+use super::AggregateMode;
 
 pub struct GroupedTopKAggregateStream {
     partition: usize,
@@ -49,22 +52,28 @@ pub struct GroupedTopKAggregateStream {
 
 impl GroupedTopKAggregateStream {
     pub fn new(
-        aggr: &AggregateExec,
+        input: &Arc<dyn ExecutionPlan>,
+        mode: AggregateMode,
+        agg_schema: SchemaRef,
+        group_by: PhysicalGroupBy,
+        aggr_expr: Vec<Arc<AggregateFunctionExpr>>,
         context: Arc<TaskContext>,
         partition: usize,
         limit: usize,
     ) -> Result<Self> {
-        let agg_schema = Arc::clone(&aggr.schema);
-        let group_by = aggr.group_by.clone();
-        let input = aggr.input.execute(partition, Arc::clone(&context))?;
+        let input = input.execute(partition, Arc::clone(&context))?;
         let aggregate_arguments =
-            aggregate_expressions(&aggr.aggr_expr, &aggr.mode, group_by.expr.len())?;
-        let (val_field, desc) = aggr
+            aggregate_expressions(&aggr_expr, &mode, group_by.expr.len())?;
+        let (val_field, desc) = aggr_expr
+            .iter()
+            .exactly_one()
+            .ok()
+            .ok_or_else(|| DataFusionError::Internal("Min/max required".to_string()))?
             .get_minmax_desc()
             .ok_or_else(|| DataFusionError::Internal("Min/max required".to_string()))?;
 
-        let (expr, _) = &aggr.group_expr().expr()[0];
-        let kt = expr.data_type(&aggr.input().schema())?;
+        let (expr, _) = &group_by.expr()[0];
+        let kt = expr.data_type(&input.schema())?;
         let vt = val_field.data_type().clone();
 
         let priority_map = PriorityMap::new(kt, vt, limit, desc)?;

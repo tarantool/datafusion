@@ -25,11 +25,12 @@ use arrow::array::Array;
 use arrow::record_batch::RecordBatch;
 use arrow::{array::ArrayRef, datatypes::Field};
 
-use datafusion_common::ScalarValue;
 use datafusion_common::{DataFusionError, Result};
+use datafusion_common::{ParamValues, ScalarValue};
 use datafusion_expr::{Accumulator, WindowFrame};
 
 use crate::aggregate::AggregateFunctionExpr;
+use crate::expressions::{resolve_placeholders, resolve_placeholders_seq};
 use crate::window::window_expr::AggregateWindowExpr;
 use crate::window::{
     PartitionBatches, PartitionWindowAggStates, SlidingAggregateWindowExpr, WindowExpr,
@@ -67,6 +68,48 @@ impl PlainAggregateWindowExpr {
     pub fn get_aggregate_expr(&self) -> &AggregateFunctionExpr {
         &self.aggregate
     }
+}
+
+/// Resolve placeholders in the physical sort expressions.
+/// If there are no placeholders, return `None`.
+/// Otherwise, returns new vector.
+///
+pub(super) fn resolve_physical_sort_placeholders(
+    exprs: &[PhysicalSortExpr],
+    param_values: &Option<ParamValues>,
+) -> Result<Option<Vec<PhysicalSortExpr>>> {
+    // If there are no placeholders in sort expressions then
+    // this vector will be empty.
+    let mut resolved_exprs = vec![];
+    for (i, expr) in exprs.iter().enumerate() {
+        let (resolved, contains_placeholders) =
+            resolve_placeholders(&expr.expr, param_values)?;
+        if !contains_placeholders {
+            continue;
+        }
+        // Build new group by vector.
+        resolved_exprs.reserve(exprs.len());
+        for j in 0..i {
+            resolved_exprs.push(exprs[j].clone());
+        }
+        resolved_exprs.push(PhysicalSortExpr {
+            expr: resolved,
+            options: expr.options.clone(),
+        });
+        for j in (i + 1)..exprs.len() {
+            let e = &exprs[j];
+            let (resolved, _) = resolve_placeholders(&e.expr, param_values)?;
+            resolved_exprs.push(PhysicalSortExpr {
+                expr: resolved,
+                options: e.options.clone(),
+            });
+        }
+    }
+    Ok(if resolved_exprs.is_empty() {
+        None
+    } else {
+        Some(resolved_exprs)
+    })
 }
 
 /// peer based evaluation based on the fact that batch is pre-sorted given the sort columns
@@ -155,6 +198,29 @@ impl WindowExpr for PlainAggregateWindowExpr {
 
     fn uses_bounded_memory(&self) -> bool {
         !self.window_frame.end_bound.is_unbounded()
+    }
+
+    fn resolve_placeholders(
+        &self,
+        param_values: &Option<ParamValues>,
+    ) -> Result<Option<Arc<dyn WindowExpr>>> {
+        let partition_by = resolve_placeholders_seq(&self.partition_by, param_values)?;
+        let aggregate = self.aggregate.resolve_placeholders(param_values)?;
+        let order_by = resolve_physical_sort_placeholders(&self.order_by, param_values)?;
+
+        Ok(
+            if partition_by.is_some() || aggregate.is_some() || order_by.is_some() {
+                Some(Arc::new(Self {
+                    aggregate: aggregate.unwrap_or_else(|| Arc::clone(&self.aggregate)),
+                    partition_by: partition_by
+                        .unwrap_or_else(|| self.partition_by.clone()),
+                    order_by: order_by.unwrap_or_else(|| self.order_by.clone()),
+                    window_frame: self.window_frame.clone(),
+                }))
+            } else {
+                None
+            },
+        )
     }
 }
 

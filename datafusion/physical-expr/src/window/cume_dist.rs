@@ -68,6 +68,13 @@ impl BuiltInWindowFunctionExpr for CumeDist {
     fn create_evaluator(&self) -> Result<Box<dyn PartitionEvaluator>> {
         Ok(Box::new(CumeDistEvaluator {}))
     }
+
+    fn resolve_placeholders(
+        &self,
+        _param_values: &Option<datafusion_common::ParamValues>,
+    ) -> Result<Option<Arc<dyn BuiltInWindowFunctionExpr>>> {
+        Ok(None)
+    }
 }
 
 #[derive(Debug)]

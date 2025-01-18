@@ -667,6 +667,8 @@ impl ExecutionPlan for HashJoinExec {
         partition: usize,
         context: Arc<TaskContext>,
     ) -> Result<SendableRecordBatchStream> {
+        // No need to resolve placeholders in `on` expressions because
+        // they must be columns.
         let on_left = self
             .on
             .iter()
@@ -730,6 +732,13 @@ impl ExecutionPlan for HashJoinExec {
             }
         };
 
+        // Resolve placeholders in filter.
+        let resolved_filter = if let Some(ref filter) = self.filter {
+            Some(filter.resolve_placeholders(context.param_values())?)
+        } else {
+            None
+        };
+
         let batch_size = context.session_config().batch_size();
 
         // we have the batches and the hash map with their keys. We can how create a stream
@@ -749,7 +758,7 @@ impl ExecutionPlan for HashJoinExec {
             schema: self.schema(),
             on_left,
             on_right,
-            filter: self.filter.clone(),
+            filter: resolved_filter,
             join_type: self.join_type,
             right: right_stream,
             column_indices: column_indices_after_projection,
@@ -1537,12 +1546,14 @@ mod tests {
     use arrow_buffer::NullBuffer;
     use datafusion_common::{
         assert_batches_eq, assert_batches_sorted_eq, assert_contains, exec_err,
-        ScalarValue,
+        ParamValues, ScalarValue,
     };
     use datafusion_execution::config::SessionConfig;
     use datafusion_execution::runtime_env::RuntimeEnvBuilder;
     use datafusion_expr::Operator;
-    use datafusion_physical_expr::expressions::{BinaryExpr, Literal};
+    use datafusion_physical_expr::expressions::{
+        binary, col, placeholder, BinaryExpr, Literal,
+    };
     use datafusion_physical_expr::PhysicalExpr;
 
     use hashbrown::raw::RawTable;
@@ -3210,6 +3221,42 @@ mod tests {
         JoinFilter::new(filter_expression, column_indices, intermediate_schema)
     }
 
+    fn prepare_join_filter_with_placeholders() -> JoinFilter {
+        let column_indices = vec![
+            ColumnIndex {
+                index: 2,
+                side: JoinSide::Left,
+            },
+            ColumnIndex {
+                index: 2,
+                side: JoinSide::Right,
+            },
+        ];
+        let intermediate_schema = Schema::new(vec![
+            Field::new("c", DataType::Int32, true),
+            Field::new("c", DataType::Int32, true),
+        ]);
+        let filter_expression = Arc::new(BinaryExpr::new(
+            binary(
+                Arc::new(Column::new("c", 0)),
+                Operator::Plus,
+                placeholder("$a", DataType::Int32),
+                &intermediate_schema,
+            )
+            .unwrap(),
+            Operator::Gt,
+            binary(
+                Arc::new(Column::new("c", 1)),
+                Operator::Plus,
+                placeholder("$b", DataType::Int32),
+                &intermediate_schema,
+            )
+            .unwrap(),
+        )) as Arc<dyn PhysicalExpr>;
+
+        JoinFilter::new(filter_expression, column_indices, intermediate_schema)
+    }
+
     #[apply(batch_sizes)]
     #[tokio::test]
     async fn join_inner_with_filter(batch_size: usize) -> Result<()> {
@@ -3969,6 +4016,46 @@ mod tests {
         let expected_null_neq =
             ["+----+----+", "| n1 | n2 |", "+----+----+", "+----+----+"];
         assert_batches_eq!(expected_null_neq, &batches_null_neq);
+
+        Ok(())
+    }
+
+    #[tokio::test]
+    async fn join_with_placeholders() -> Result<()> {
+        let left = build_table(
+            ("a", &vec![0, 1, 2, 2]),
+            ("b", &vec![4, 5, 7, 8]),
+            ("c", &vec![7, 8, 9, 1]),
+        );
+        let right = build_table(
+            ("a", &vec![10, 20, 30, 40]),
+            ("b", &vec![2, 2, 3, 4]),
+            ("c", &vec![7, 5, 6, 4]),
+        );
+        let on = vec![(col("a", &left.schema())?, col("b", &right.schema())?)];
+        let filter = prepare_join_filter_with_placeholders();
+        let params = ParamValues::Map(std::collections::HashMap::from([
+            ("a".into(), ScalarValue::Int32(Some(0))),
+            ("b".into(), ScalarValue::Int32(Some(0))),
+        ]));
+        let task_ctx = Arc::new(TaskContext::default().with_param_values(params));
+        let join = join_with_filter(left, right, on, filter, &JoinType::Inner, false)?;
+
+        let columns = columns(&join.schema());
+        assert_eq!(columns, vec!["a", "b", "c", "a", "b", "c"]);
+
+        let stream = join.execute(0, task_ctx)?;
+        let batches = common::collect(stream).await?;
+
+        let expected = [
+            "+---+---+---+----+---+---+",
+            "| a | b | c | a  | b | c |",
+            "+---+---+---+----+---+---+",
+            "| 2 | 7 | 9 | 10 | 2 | 7 |",
+            "| 2 | 7 | 9 | 20 | 2 | 5 |",
+            "+---+---+---+----+---+---+",
+        ];
+        assert_batches_sorted_eq!(expected, &batches);
 
         Ok(())
     }

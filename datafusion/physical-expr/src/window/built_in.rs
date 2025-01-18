@@ -22,7 +22,8 @@ use std::ops::Range;
 use std::sync::Arc;
 
 use super::{BuiltInWindowFunctionExpr, WindowExpr};
-use crate::expressions::PhysicalSortExpr;
+use crate::expressions::{resolve_placeholders_seq, PhysicalSortExpr};
+use crate::window::aggregate::resolve_physical_sort_placeholders;
 use crate::window::window_expr::{get_orderby_values, WindowFn};
 use crate::window::{PartitionBatches, PartitionWindowAggStates, WindowState};
 use crate::{reverse_order_bys, EquivalenceProperties, PhysicalExpr};
@@ -31,7 +32,7 @@ use arrow::compute::SortOptions;
 use arrow::datatypes::Field;
 use arrow::record_batch::RecordBatch;
 use datafusion_common::utils::evaluate_partition_ranges;
-use datafusion_common::{Result, ScalarValue};
+use datafusion_common::{ParamValues, Result, ScalarValue};
 use datafusion_expr::window_state::{WindowAggState, WindowFrameContext};
 use datafusion_expr::WindowFrame;
 
@@ -280,5 +281,28 @@ impl WindowExpr for BuiltInWindowExpr {
         } else {
             false
         }
+    }
+
+    fn resolve_placeholders(
+        &self,
+        param_values: &Option<ParamValues>,
+    ) -> Result<Option<Arc<dyn WindowExpr>>> {
+        let expr = self.expr.resolve_placeholders(param_values)?;
+        let order_by = resolve_physical_sort_placeholders(&self.order_by, param_values)?;
+        let partition_by = resolve_placeholders_seq(&self.partition_by, param_values)?;
+
+        Ok(
+            if expr.is_some() || order_by.is_some() || partition_by.is_some() {
+                Some(Arc::new(Self {
+                    expr: expr.unwrap_or_else(|| Arc::clone(&self.expr)),
+                    partition_by: partition_by
+                        .unwrap_or_else(|| self.partition_by.clone()),
+                    order_by: order_by.unwrap_or_else(|| self.order_by.clone()),
+                    window_frame: self.window_frame.clone(),
+                }))
+            } else {
+                None
+            },
+        )
     }
 }

@@ -40,7 +40,7 @@ use datafusion_common::stats::Precision;
 use datafusion_common::Result;
 use datafusion_execution::TaskContext;
 use datafusion_physical_expr::equivalence::ProjectionMapping;
-use datafusion_physical_expr::expressions::Literal;
+use datafusion_physical_expr::expressions::{resolve_placeholders, Literal};
 
 use futures::stream::{Stream, StreamExt};
 use log::trace;
@@ -212,7 +212,15 @@ impl ExecutionPlan for ProjectionExec {
         trace!("Start ProjectionExec::execute for partition {} of context session_id {} and task_id {:?}", partition, context.session_id(), context.task_id());
         Ok(Box::pin(ProjectionStream {
             schema: Arc::clone(&self.schema),
-            expr: self.expr.iter().map(|x| Arc::clone(&x.0)).collect(),
+            expr: self
+                .expr
+                .iter()
+                .map(|x| {
+                    let (resolved, _) =
+                        resolve_placeholders(&x.0, context.param_values())?;
+                    Ok(resolved)
+                })
+                .collect::<Result<_>>()?,
             input: self.input.execute(partition, context)?,
             baseline_metrics: BaselineMetrics::new(&self.metrics, partition),
         }))
@@ -351,7 +359,13 @@ mod tests {
     use crate::test;
 
     use arrow_schema::DataType;
+    use datafusion_common::ParamValues;
     use datafusion_common::ScalarValue;
+    use datafusion_expr::Operator;
+    use datafusion_physical_expr::expressions::binary;
+    use datafusion_physical_expr::expressions::col;
+    use datafusion_physical_expr::expressions::lit;
+    use datafusion_physical_expr::expressions::placeholder;
 
     #[tokio::test]
     async fn project_no_column() -> Result<()> {
@@ -469,5 +483,50 @@ mod tests {
         };
 
         assert_eq!(result, expected);
+    }
+
+    #[tokio::test]
+    async fn test_projection_with_placeholder() -> Result<()> {
+        let scan = test::scan_partitioned(1);
+        let schema = Arc::clone(&scan.schema());
+        let projection = ProjectionExec::try_new(
+            vec![(
+                binary(
+                    col("i", schema.as_ref())?,
+                    Operator::Plus,
+                    lit(42),
+                    schema.as_ref(),
+                )?,
+                "i + 42".into(),
+            )],
+            Arc::clone(&scan),
+        )?;
+        let stream = projection.execute(0, Arc::new(TaskContext::default()))?;
+        let expected = collect(stream).await?;
+
+        let params = ParamValues::Map(std::collections::HashMap::from([(
+            "a".into(),
+            ScalarValue::Int32(Some(42)),
+        )]));
+        let task_ctx = Arc::new(TaskContext::default().with_param_values(params));
+
+        let projection = ProjectionExec::try_new(
+            vec![(
+                binary(
+                    col("i", schema.as_ref()).unwrap(),
+                    Operator::Plus,
+                    placeholder("$a", DataType::Int32),
+                    schema.as_ref(),
+                )?,
+                "i + $a".into(),
+            )],
+            scan,
+        )
+        .unwrap();
+
+        let stream = projection.execute(0, Arc::clone(&task_ctx))?;
+        let output = collect(stream).await?;
+        assert_eq!(output[0].column(0), expected[0].column(0));
+        Ok(())
     }
 }

@@ -130,6 +130,13 @@ impl BuiltInWindowFunctionExpr for WindowShift {
             ignore_nulls: self.ignore_nulls,
         }))
     }
+
+    fn resolve_placeholders(
+        &self,
+        _param_values: &Option<datafusion_common::ParamValues>,
+    ) -> Result<Option<Arc<dyn BuiltInWindowFunctionExpr>>> {
+        Ok(None)
+    }
 }
 
 #[derive(Debug)]

@@ -665,6 +665,13 @@ impl WindowUDFImpl for SimpleWindowUDF {
     fn partition_evaluator(&self) -> Result<Box<dyn crate::PartitionEvaluator>> {
         (self.partition_evaluator_factory)()
     }
+
+    fn resolve_placeholders(
+        &self,
+        _param_values: &Option<datafusion_common::ParamValues>,
+    ) -> Result<Option<Arc<dyn WindowUDFImpl>>> {
+        Ok(None)
+    }
 }
 
 pub fn interval_year_month_lit(value: &str) -> Expr {

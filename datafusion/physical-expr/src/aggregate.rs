@@ -35,8 +35,8 @@ pub mod utils {
 }
 
 use arrow::datatypes::{DataType, Field, Schema, SchemaRef};
-use datafusion_common::ScalarValue;
 use datafusion_common::{internal_err, not_impl_err, Result};
+use datafusion_common::{ParamValues, ScalarValue};
 use datafusion_expr::AggregateUDF;
 use datafusion_expr::ReversedUDAF;
 use datafusion_expr_common::accumulator::Accumulator;
@@ -51,6 +51,8 @@ use datafusion_physical_expr_common::utils::reverse_order_bys;
 use datafusion_expr_common::groups_accumulator::GroupsAccumulator;
 use std::fmt::Debug;
 use std::sync::Arc;
+
+use crate::expressions::resolve_placeholders_seq;
 
 /// Builder for physical [`AggregateFunctionExpr`]
 ///
@@ -527,6 +529,38 @@ impl AggregateFunctionExpr {
     /// while `count` returns 0 if input is Null
     pub fn default_value(&self, data_type: &DataType) -> Result<ScalarValue> {
         self.fun.default_value(data_type)
+    }
+
+    /// Resolves placeholders.
+    /// If there are no placeholders returns [`None`].
+    /// Otherwise returns [`Some`] that contains resolved expression.
+    pub fn resolve_placeholders(
+        self: &Arc<Self>,
+        param_values: &Option<ParamValues>,
+    ) -> Result<Option<Arc<Self>>> {
+        Ok(
+            if let Some(resolved_args) =
+                resolve_placeholders_seq(&self.args, param_values)?
+            {
+                Some(Arc::new(AggregateFunctionExpr {
+                    fun: self.fun.clone(),
+                    args: resolved_args,
+                    data_type: self.data_type.clone(),
+                    name: self.name.clone(),
+                    schema: self.schema.clone(),
+                    ordering_req: self.ordering_req.clone(),
+                    ignore_nulls: self.ignore_nulls,
+                    ordering_fields: self.ordering_fields.clone(),
+                    is_distinct: self.is_distinct,
+                    is_reversed: self.is_reversed,
+                    input_types: self.input_types.clone(),
+                    is_nullable: self.is_nullable,
+                }))
+            } else {
+                // Args do not contain placeholders at all.
+                None
+            },
+        )
     }
 }
 

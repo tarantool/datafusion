@@ -358,6 +358,13 @@ pub fn create_physical_expr(
                 expressions::in_list(value_expr, list_exprs, negated, input_schema)
             }
         },
+        Expr::Placeholder(p) => {
+            if let Some(ref data_type) = p.data_type {
+                Ok(expressions::placeholder(p.id.clone(), data_type.clone()))
+            } else {
+                plan_err!("placeholder with id {} type is not inferred", p.id)
+            }
+        }
         other => {
             not_impl_err!("Physical plan does not support logical expression {other:?}")
         }

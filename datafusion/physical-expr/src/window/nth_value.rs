@@ -23,14 +23,15 @@ use std::cmp::Ordering;
 use std::ops::Range;
 use std::sync::Arc;
 
+use crate::expressions::resolve_placeholders;
 use crate::window::window_expr::{NthValueKind, NthValueState};
 use crate::window::BuiltInWindowFunctionExpr;
 use crate::PhysicalExpr;
 
 use arrow::array::{Array, ArrayRef};
 use arrow::datatypes::{DataType, Field};
-use datafusion_common::Result;
 use datafusion_common::{exec_err, ScalarValue};
+use datafusion_common::{ParamValues, Result};
 use datafusion_expr::window_state::WindowAggState;
 use datafusion_expr::PartitionEvaluator;
 
@@ -147,6 +148,24 @@ impl BuiltInWindowFunctionExpr for NthValue {
             kind: reversed_kind,
             ignore_nulls: self.ignore_nulls,
         }))
+    }
+
+    fn resolve_placeholders(
+        &self,
+        param_values: &Option<ParamValues>,
+    ) -> Result<Option<Arc<dyn BuiltInWindowFunctionExpr>>> {
+        let (resolved, has_placeholder) = resolve_placeholders(&self.expr, param_values)?;
+        Ok(if has_placeholder {
+            Some(Arc::new(Self {
+                name: self.name.clone(),
+                expr: resolved,
+                data_type: self.data_type.clone(),
+                kind: self.kind.clone(),
+                ignore_nulls: self.ignore_nulls,
+            }))
+        } else {
+            None
+        })
     }
 }
 

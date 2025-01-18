@@ -565,6 +565,13 @@ impl OddCounter {
             fn aliases(&self) -> &[String] {
                 &self.aliases
             }
+
+            fn resolve_placeholders(
+                &self,
+                _param_values: &Option<datafusion_common::ParamValues>,
+            ) -> Result<Option<Arc<dyn WindowUDFImpl>>> {
+                Ok(None)
+            }
         }
 
         ctx.register_udwf(WindowUDF::from(SimpleWindowUDF::new(test_state)))

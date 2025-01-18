@@ -27,12 +27,16 @@ use crate::aggregates::{
     evaluate_group_by, evaluate_many, evaluate_optional, group_schema, AggregateMode,
     PhysicalGroupBy,
 };
-use crate::metrics::{BaselineMetrics, MetricBuilder, RecordOutput};
+use crate::metrics::{
+    BaselineMetrics, ExecutionPlanMetricsSet, MetricBuilder, RecordOutput,
+};
 use crate::sorts::sort::sort_batch;
 use crate::sorts::streaming_merge;
 use crate::spill::{read_spill_as_stream, spill_record_batch_by_size};
 use crate::stream::RecordBatchStreamAdapter;
-use crate::{aggregates, metrics, ExecutionPlan, PhysicalExpr};
+use crate::{
+    aggregates, metrics, ExecutionPlan, InputOrderMode, PhysicalExpr, PlanProperties,
+};
 use crate::{RecordBatchStream, SendableRecordBatchStream};
 
 use arrow::array::*;
@@ -70,7 +74,6 @@ pub(crate) enum ExecutionState {
 }
 
 use super::order::GroupOrdering;
-use super::AggregateExec;
 
 /// This encapsulates the spilling state
 struct SpillState {
@@ -434,48 +437,48 @@ pub(crate) struct GroupedHashAggregateStream {
 impl GroupedHashAggregateStream {
     /// Create a new GroupedHashAggregateStream
     pub fn new(
-        agg: &AggregateExec,
+        input: &Arc<dyn ExecutionPlan>,
+        mode: AggregateMode,
+        agg_schema: SchemaRef,
+        agg_group_by: PhysicalGroupBy,
+        agg_expr: Vec<Arc<AggregateFunctionExpr>>,
+        agg_filter_expr: Vec<Option<Arc<dyn PhysicalExpr>>>,
+        input_order_mode: InputOrderMode,
+        metrics: &ExecutionPlanMetricsSet,
+        properties: &PlanProperties,
+        limit: Option<usize>,
         context: Arc<TaskContext>,
         partition: usize,
     ) -> Result<Self> {
         debug!("Creating GroupedHashAggregateStream");
-        let agg_schema = Arc::clone(&agg.schema);
-        let agg_group_by = agg.group_by.clone();
-        let agg_filter_expr = agg.filter_expr.clone();
-
         let batch_size = context.session_config().batch_size();
-        let input = agg.input.execute(partition, Arc::clone(&context))?;
-        let baseline_metrics = BaselineMetrics::new(&agg.metrics, partition);
+        let input = input.execute(partition, Arc::clone(&context))?;
+        let baseline_metrics = BaselineMetrics::new(&metrics, partition);
 
         let timer = baseline_metrics.elapsed_compute().timer();
 
-        let aggregate_exprs = agg.aggr_expr.clone();
-
         // arguments for each aggregate, one vec of expressions per
         // aggregate
-        let aggregate_arguments = aggregates::aggregate_expressions(
-            &agg.aggr_expr,
-            &agg.mode,
-            agg_group_by.expr.len(),
-        )?;
+        let aggregate_arguments =
+            aggregates::aggregate_expressions(&agg_expr, &mode, agg_group_by.expr.len())?;
         // arguments for aggregating spilled data is the same as the one for final aggregation
         let merging_aggregate_arguments = aggregates::aggregate_expressions(
-            &agg.aggr_expr,
+            &agg_expr,
             &AggregateMode::Final,
             agg_group_by.expr.len(),
         )?;
 
-        let filter_expressions = match agg.mode {
+        let filter_expressions = match mode {
             AggregateMode::Partial
             | AggregateMode::Single
             | AggregateMode::SinglePartitioned => agg_filter_expr,
             AggregateMode::Final | AggregateMode::FinalPartitioned => {
-                vec![None; agg.aggr_expr.len()]
+                vec![None; agg_expr.len()]
             }
         };
 
         // Instantiate the accumulators
-        let accumulators: Vec<_> = aggregate_exprs
+        let accumulators: Vec<_> = agg_expr
             .iter()
             .map(create_group_accumulator)
             .collect::<Result<_>>()?;
@@ -495,13 +498,12 @@ impl GroupedHashAggregateStream {
         let reservation = MemoryConsumer::new(name)
             .with_can_spill(true)
             .register(context.memory_pool());
-        let (ordering, _) = agg
-            .properties()
+        let (ordering, _) = properties
             .equivalence_properties()
             .find_longest_permutation(&agg_group_by.output_exprs());
         let group_ordering = GroupOrdering::try_new(
             &group_schema,
-            &agg.input_order_mode,
+            &input_order_mode,
             ordering.as_slice(),
         )?;
 
@@ -526,7 +528,7 @@ impl GroupedHashAggregateStream {
         // - all accumulators support input batch to intermediate
         //   aggregate state conversion
         // - there is only one GROUP BY expressions set
-        let skip_aggregation_probe = if agg.mode == AggregateMode::Partial
+        let skip_aggregation_probe = if mode == AggregateMode::Partial
             && matches!(group_ordering, GroupOrdering::None)
             && accumulators
                 .iter()
@@ -538,7 +540,7 @@ impl GroupedHashAggregateStream {
                 options.skip_partial_aggregation_probe_rows_threshold;
             let probe_ratio_threshold =
                 options.skip_partial_aggregation_probe_ratio_threshold;
-            let skipped_aggregation_rows = MetricBuilder::new(&agg.metrics)
+            let skipped_aggregation_rows = MetricBuilder::new(metrics)
                 .counter("skipped_aggregation_rows", partition);
             Some(SkipAggregationProbe::new(
                 probe_rows_threshold,
@@ -552,7 +554,7 @@ impl GroupedHashAggregateStream {
         Ok(GroupedHashAggregateStream {
             schema: agg_schema,
             input,
-            mode: agg.mode,
+            mode: mode,
             accumulators,
             aggregate_arguments,
             filter_expressions,
@@ -567,7 +569,7 @@ impl GroupedHashAggregateStream {
             input_done: false,
             runtime: context.runtime_env(),
             spill_state,
-            group_values_soft_limit: agg.limit,
+            group_values_soft_limit: limit,
             skip_aggregation_probe,
         })
     }

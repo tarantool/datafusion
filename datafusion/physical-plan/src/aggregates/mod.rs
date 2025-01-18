@@ -37,9 +37,10 @@ use arrow::array::ArrayRef;
 use arrow::datatypes::{Field, Schema, SchemaRef};
 use arrow::record_batch::RecordBatch;
 use datafusion_common::stats::Precision;
-use datafusion_common::{internal_err, not_impl_err, Result};
+use datafusion_common::{internal_err, not_impl_err, ParamValues, Result};
 use datafusion_execution::TaskContext;
 use datafusion_expr::Accumulator;
+use datafusion_physical_expr::expressions::resolve_placeholders;
 use datafusion_physical_expr::{
     equivalence::{collapse_lex_req, ProjectionMapping},
     expressions::Column,
@@ -218,6 +219,27 @@ impl PhysicalGroupBy {
             .enumerate()
             .map(|(index, (_, name))| Arc::new(Column::new(name, index)) as _)
             .collect()
+    }
+
+    /// Resolve all placeholders and return the clone.
+    pub fn resolve_placeholders(
+        &self,
+        param_values: &Option<ParamValues>,
+    ) -> Result<Self> {
+        let expr = self
+            .expr
+            .iter()
+            .map(|(expr, name)| {
+                let (resolved, _) = resolve_placeholders(expr, param_values)?;
+                Ok((resolved, name.clone()))
+            })
+            .collect::<Result<_>>()?;
+        Ok(Self {
+            expr: expr,
+            // No need to resolve placeholders at null expressions.
+            null_expr: self.null_expr.clone(),
+            groups: self.groups.clone(),
+        })
     }
 }
 
@@ -493,25 +515,78 @@ impl AggregateExec {
         partition: usize,
         context: Arc<TaskContext>,
     ) -> Result<StreamType> {
+        let param_values = context.param_values();
+        // Resolve placeholders at aggregates.
+        let aggr_expr = self
+            .aggr_expr
+            .iter()
+            .map(|e| {
+                e.resolve_placeholders(param_values)
+                    .map(|expr| expr.unwrap_or_else(|| Arc::clone(&e)))
+            })
+            .collect::<Result<_>>()?;
+
+        // Resolve placeholders at filters.
+        let filter_expr = self
+            .filter_expr
+            .iter()
+            .map(|expr| {
+                Ok(if let Some(ref expr) = expr {
+                    let (resolved, _) = resolve_placeholders(expr, param_values)?;
+                    Some(resolved)
+                } else {
+                    None
+                })
+            })
+            .collect::<Result<_>>()?;
+
         // no group by at all
         if self.group_by.expr.is_empty() {
             return Ok(StreamType::AggregateStream(AggregateStream::new(
-                self, context, partition,
+                &self.input,
+                self.mode.clone(),
+                Arc::clone(&self.schema),
+                aggr_expr,
+                filter_expr,
+                &self.metrics,
+                context,
+                partition,
             )?));
         }
 
+        let group_by = self.group_by.resolve_placeholders(param_values)?;
         // grouping by an expression that has a sort/limit upstream
         if let Some(limit) = self.limit {
             if !self.is_unordered_unfiltered_group_by_distinct() {
                 return Ok(StreamType::GroupedPriorityQueue(
-                    GroupedTopKAggregateStream::new(self, context, partition, limit)?,
+                    GroupedTopKAggregateStream::new(
+                        &self.input,
+                        self.mode.clone(),
+                        Arc::clone(&self.schema),
+                        group_by,
+                        aggr_expr,
+                        context,
+                        partition,
+                        limit,
+                    )?,
                 ));
             }
         }
 
         // grouping by something else and we need to just materialize all results
         Ok(StreamType::GroupedHash(GroupedHashAggregateStream::new(
-            self, context, partition,
+            &self.input,
+            self.mode.clone(),
+            Arc::clone(&self.schema),
+            group_by,
+            aggr_expr,
+            filter_expr,
+            self.input_order_mode.clone(),
+            &self.metrics,
+            self.properties(),
+            self.limit,
+            context,
+            partition,
         )?))
     }
 
