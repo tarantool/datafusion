@@ -23,13 +23,14 @@ use arrow::{
     record_batch::RecordBatch,
 };
 use datafusion::execution::runtime_env::RuntimeEnvBuilder;
+use datafusion::physical_plan::collect;
 use datafusion::physical_plan::expressions::PhysicalSortExpr;
 use datafusion::physical_plan::memory::MemoryExec;
 use datafusion::physical_plan::sorts::sort::SortExec;
-use datafusion::physical_plan::{collect, ExecutionPlan};
 use datafusion::prelude::{SessionConfig, SessionContext};
 use datafusion_execution::memory_pool::GreedyMemoryPool;
 use datafusion_physical_expr::expressions::col;
+use datafusion_physical_plan::ExecutionPlan;
 use rand::Rng;
 use std::sync::Arc;
 use test_utils::{batches_to_vec, partitions_to_sorted_vec};
@@ -146,20 +147,28 @@ impl SortTest {
         };
 
         let task_ctx = session_ctx.task_ctx();
-        let collected = collect(sort.clone(), task_ctx).await.unwrap();
+        let collected = collect(sort.clone(), Arc::clone(&task_ctx)).await.unwrap();
 
         let expected = partitions_to_sorted_vec(&input);
         let actual = batches_to_vec(&collected);
 
         if self.should_spill {
             assert_ne!(
-                sort.metrics().unwrap().spill_count().unwrap(),
+                task_ctx
+                    .plan_metrics(sort.as_any())
+                    .unwrap()
+                    .spill_count()
+                    .unwrap(),
                 0,
                 "Expected spill, but did not: {self:?}"
             );
         } else {
             assert_eq!(
-                sort.metrics().unwrap().spill_count().unwrap(),
+                task_ctx
+                    .plan_metrics(sort.as_any())
+                    .unwrap()
+                    .spill_count()
+                    .unwrap(),
                 0,
                 "Expected no spill, but did: {self:?}"
             );

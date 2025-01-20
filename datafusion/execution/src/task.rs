@@ -16,6 +16,7 @@
 // under the License.
 
 use std::{
+    any::Any,
     collections::{HashMap, HashSet},
     sync::Arc,
 };
@@ -23,6 +24,7 @@ use std::{
 use crate::{
     config::SessionConfig,
     memory_pool::MemoryPool,
+    metrics::{ExecutionPlanMetricsSet, MetricsSet},
     registry::FunctionRegistry,
     runtime_env::{RuntimeEnv, RuntimeEnvBuilder},
 };
@@ -55,6 +57,9 @@ pub struct TaskContext {
     runtime: Arc<RuntimeEnv>,
     /// Param values for physical placeholders.
     param_values: Option<ParamValues>,
+    /// Metrics associated with a execution plan address.
+    /// std mutex is used because too concurrent access is not assumed.
+    metrics: std::sync::Mutex<HashMap<usize, ExecutionPlanMetricsSet>>,
 }
 
 impl Default for TaskContext {
@@ -73,8 +78,13 @@ impl Default for TaskContext {
             window_functions: HashMap::new(),
             runtime,
             param_values: None,
+            metrics: Default::default(),
         }
     }
+}
+
+fn plan_addr(plan: &dyn Any) -> usize {
+    plan as *const _ as *const () as usize
 }
 
 impl TaskContext {
@@ -101,6 +111,7 @@ impl TaskContext {
             window_functions,
             runtime,
             param_values: None,
+            metrics: Default::default(),
         }
     }
 
@@ -150,6 +161,50 @@ impl TaskContext {
     pub fn with_runtime(mut self, runtime: Arc<RuntimeEnv>) -> Self {
         self.runtime = runtime;
         self
+    }
+
+    /// Return plan metrics by execution plan addr if some.
+    pub fn plan_metrics(&self, plan: &dyn Any) -> Option<MetricsSet> {
+        let addr = plan_addr(plan);
+        self.metrics
+            .lock()
+            .unwrap()
+            .get(&addr)
+            .map(|m| m.clone_inner())
+    }
+
+    /// Associate metrics with execution plan addr or return existed metric set.
+    /// Execution plan should register metrics in `execute` using it to have an ability
+    /// to display it in the future.
+    pub fn get_or_register_metric_set(&self, plan: &dyn Any) -> ExecutionPlanMetricsSet {
+        let addr = plan_addr(plan);
+        let mut metrics = self.metrics.lock().unwrap();
+        if let Some(metric_set) = metrics.get(&addr) {
+            metric_set.clone()
+        } else {
+            let metric_set = ExecutionPlanMetricsSet::new();
+            metrics.insert(addr, metric_set.clone());
+            metric_set
+        }
+    }
+
+    /// Associate metrics with execution plan addr or return existed metric set.
+    /// If there is no associated metric set uses provided callback to create
+    /// default set.
+    pub fn get_or_register_metric_set_with_default(
+        &self,
+        plan: &dyn Any,
+        default_set: impl Fn() -> ExecutionPlanMetricsSet,
+    ) -> ExecutionPlanMetricsSet {
+        let addr = plan_addr(plan);
+        let mut metrics = self.metrics.lock().unwrap();
+        if let Some(metric_set) = metrics.get(&addr) {
+            metric_set.clone()
+        } else {
+            let metric_set = default_set();
+            metrics.insert(addr, metric_set.clone());
+            metric_set
+        }
     }
 }
 

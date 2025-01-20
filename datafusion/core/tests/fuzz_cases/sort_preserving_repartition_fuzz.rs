@@ -24,17 +24,14 @@ mod sp_repartition_fuzz_tests {
     use arrow_schema::{DataType, Field, Schema, SchemaRef, SortOptions};
 
     use datafusion::physical_plan::{
-        collect,
-        memory::MemoryExec,
-        metrics::{BaselineMetrics, ExecutionPlanMetricsSet},
-        repartition::RepartitionExec,
+        collect, memory::MemoryExec, repartition::RepartitionExec,
         sorts::sort_preserving_merge::SortPreservingMergeExec,
-        sorts::streaming_merge::streaming_merge,
-        stream::RecordBatchStreamAdapter,
+        sorts::streaming_merge::streaming_merge, stream::RecordBatchStreamAdapter,
         ExecutionPlan, Partitioning,
     };
     use datafusion::prelude::SessionContext;
     use datafusion_common::Result;
+    use datafusion_execution::metrics::{BaselineMetrics, ExecutionPlanMetricsSet};
     use datafusion_execution::{
         config::SessionConfig, memory_pool::MemoryConsumer, SendableRecordBatchStream,
     };

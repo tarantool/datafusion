@@ -23,7 +23,6 @@ use super::utils::{
     StatefulStreamResult,
 };
 use crate::coalesce_partitions::CoalescePartitionsExec;
-use crate::metrics::{ExecutionPlanMetricsSet, MetricsSet};
 use crate::{
     execution_mode_from_children, handle_state, ColumnStatistics, DisplayAs,
     DisplayFormatType, Distribution, ExecutionMode, ExecutionPlan,
@@ -60,8 +59,6 @@ pub struct CrossJoinExec {
     schema: SchemaRef,
     /// Build-side data
     left_fut: OnceAsync<JoinLeftData>,
-    /// Execution plan metrics
-    metrics: ExecutionPlanMetricsSet,
     cache: PlanProperties,
 }
 
@@ -91,7 +88,6 @@ impl CrossJoinExec {
             right,
             schema,
             left_fut: Default::default(),
-            metrics: ExecutionPlanMetricsSet::default(),
             cache,
         }
     }
@@ -212,10 +208,6 @@ impl ExecutionPlan for CrossJoinExec {
         vec![&self.left, &self.right]
     }
 
-    fn metrics(&self) -> Option<MetricsSet> {
-        Some(self.metrics.clone_inner())
-    }
-
     fn with_new_children(
         self: Arc<Self>,
         children: Vec<Arc<dyn ExecutionPlan>>,
@@ -240,7 +232,8 @@ impl ExecutionPlan for CrossJoinExec {
     ) -> Result<SendableRecordBatchStream> {
         let stream = self.right.execute(partition, Arc::clone(&context))?;
 
-        let join_metrics = BuildProbeJoinMetrics::new(partition, &self.metrics);
+        let metrics = context.get_or_register_metric_set(self);
+        let join_metrics = BuildProbeJoinMetrics::new(partition, &metrics);
 
         // Initialization of operator-level reservation
         let reservation =
@@ -249,7 +242,7 @@ impl ExecutionPlan for CrossJoinExec {
         let left_fut = self.left_fut.once(|| {
             load_left_input(
                 Arc::clone(&self.left),
-                context,
+                Arc::clone(&context),
                 join_metrics.clone(),
                 reservation,
             )

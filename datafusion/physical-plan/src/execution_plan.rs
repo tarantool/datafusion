@@ -42,8 +42,6 @@ use datafusion_physical_expr_common::sort_expr::LexRequirement;
 use crate::coalesce_partitions::CoalescePartitionsExec;
 use crate::display::DisplayableExecutionPlan;
 pub use crate::display::{DefaultDisplay, DisplayAs, DisplayFormatType, VerboseDisplay};
-pub use crate::metrics::Metric;
-use crate::metrics::MetricsSet;
 pub use crate::ordering::InputOrderMode;
 use crate::repartition::RepartitionExec;
 use crate::sorts::sort_preserving_merge::SortPreservingMergeExec;
@@ -360,21 +358,6 @@ pub trait ExecutionPlan: Debug + DisplayAs + Send + Sync {
         partition: usize,
         context: Arc<TaskContext>,
     ) -> Result<SendableRecordBatchStream>;
-
-    /// Return a snapshot of the set of [`Metric`]s for this
-    /// [`ExecutionPlan`]. If no `Metric`s are available, return None.
-    ///
-    /// While the values of the metrics in the returned
-    /// [`MetricsSet`]s may change as execution progresses, the
-    /// specific metrics will not.
-    ///
-    /// Once `self.execute()` has returned (technically the future is
-    /// resolved) for all available partitions, the set of metrics
-    /// should be complete. If this function is called prior to
-    /// `execute()` new metrics may appear in subsequent calls.
-    fn metrics(&self) -> Option<MetricsSet> {
-        None
-    }
 
     /// Returns statistics for this `ExecutionPlan` node. If statistics are not
     /// available, should return [`Statistics::new_unknown`] (the default), not

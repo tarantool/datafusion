@@ -219,11 +219,12 @@ impl RunOpt {
                 displayable(physical_plan.as_ref()).indent(true)
             );
         }
-        let result = collect(physical_plan.clone(), state.task_ctx()).await?;
+        let task_ctx = state.task_ctx();
+        let result = collect(physical_plan.clone(), Arc::clone(&task_ctx)).await?;
         if debug {
             println!(
                 "=== Physical plan with metrics ===\n{}\n",
-                DisplayableExecutionPlan::with_metrics(physical_plan.as_ref())
+                DisplayableExecutionPlan::with_metrics(physical_plan.as_ref(), task_ctx)
                     .indent(true)
             );
             if !result.is_empty() {

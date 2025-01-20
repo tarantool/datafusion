@@ -22,7 +22,6 @@ use std::sync::Arc;
 use std::task::{Context, Poll};
 
 use super::{
-    metrics::{BaselineMetrics, ExecutionPlanMetricsSet, MetricsSet},
     work_table::{ReservedBatches, WorkTable, WorkTableExec},
     PlanProperties, RecordBatchStream, SendableRecordBatchStream, Statistics,
 };
@@ -33,6 +32,7 @@ use arrow::record_batch::RecordBatch;
 use datafusion_common::tree_node::{Transformed, TransformedResult, TreeNode};
 use datafusion_common::{not_impl_err, DataFusionError, Result};
 use datafusion_execution::memory_pool::{MemoryConsumer, MemoryReservation};
+use datafusion_execution::metrics::BaselineMetrics;
 use datafusion_execution::TaskContext;
 use datafusion_physical_expr::{EquivalenceProperties, Partitioning};
 
@@ -65,8 +65,6 @@ pub struct RecursiveQueryExec {
     recursive_term: Arc<dyn ExecutionPlan>,
     /// Distinction
     is_distinct: bool,
-    /// Execution metrics
-    metrics: ExecutionPlanMetricsSet,
     /// Cache holding plan properties like equivalences, output partitioning etc.
     cache: PlanProperties,
 }
@@ -90,7 +88,6 @@ impl RecursiveQueryExec {
             recursive_term,
             is_distinct,
             work_table,
-            metrics: ExecutionPlanMetricsSet::new(),
             cache,
         })
     }
@@ -168,18 +165,16 @@ impl ExecutionPlan for RecursiveQueryExec {
         }
 
         let static_stream = self.static_term.execute(partition, Arc::clone(&context))?;
-        let baseline_metrics = BaselineMetrics::new(&self.metrics, partition);
+        let metrics = context.get_or_register_metric_set(self);
+        let baseline_metrics = BaselineMetrics::new(&metrics, partition);
+
         Ok(Box::pin(RecursiveQueryStream::new(
-            context,
+            Arc::clone(&context),
             Arc::clone(&self.work_table),
             Arc::clone(&self.recursive_term),
             static_stream,
             baseline_metrics,
         )))
-    }
-
-    fn metrics(&self) -> Option<MetricsSet> {
-        Some(self.metrics.clone_inner())
     }
 
     fn statistics(&self) -> Result<Statistics> {

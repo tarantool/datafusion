@@ -29,7 +29,6 @@ use std::task::{Context, Poll};
 
 use super::utils::create_schema;
 use crate::expressions::PhysicalSortExpr;
-use crate::metrics::{BaselineMetrics, ExecutionPlanMetricsSet, MetricsSet};
 use crate::windows::{
     calc_requirements, get_ordered_partition_by_indices, get_partition_by_sort_exprs,
     window_equivalence_properties,
@@ -53,6 +52,7 @@ use datafusion_common::utils::{
     get_record_batch_at_indices, get_row_at_idx,
 };
 use datafusion_common::{arrow_datafusion_err, exec_err, DataFusionError, Result};
+use datafusion_execution::metrics::BaselineMetrics;
 use datafusion_execution::TaskContext;
 use datafusion_expr::window_state::{PartitionBatchState, WindowAggState};
 use datafusion_expr::ColumnarValue;
@@ -78,8 +78,6 @@ pub struct BoundedWindowAggExec {
     schema: SchemaRef,
     /// Partition Keys
     pub partition_keys: Vec<Arc<dyn PhysicalExpr>>,
-    /// Execution metrics
-    metrics: ExecutionPlanMetricsSet,
     /// Describes how the input is ordered relative to the partition keys
     pub input_order_mode: InputOrderMode,
     /// Partition by indices that define ordering
@@ -127,7 +125,6 @@ impl BoundedWindowAggExec {
             window_expr,
             schema,
             partition_keys,
-            metrics: ExecutionPlanMetricsSet::new(),
             input_order_mode,
             ordered_partition_by_indices,
             cache,
@@ -311,20 +308,17 @@ impl ExecutionPlan for BoundedWindowAggExec {
             })
             .collect::<Result<_>>()?;
 
-        let input = self.input.execute(partition, context)?;
+        let input = self.input.execute(partition, Arc::clone(&context))?;
         let search_mode = self.get_search_algo()?;
+        let metrics = context.get_or_register_metric_set(self);
         let stream = Box::pin(BoundedWindowAggStream::new(
             Arc::clone(&self.schema),
             window_expr,
             input,
-            BaselineMetrics::new(&self.metrics, partition),
+            BaselineMetrics::new(&metrics, partition),
             search_mode,
         )?);
         Ok(stream)
-    }
-
-    fn metrics(&self) -> Option<MetricsSet> {
-        Some(self.metrics.clone_inner())
     }
 
     fn statistics(&self) -> Result<Statistics> {

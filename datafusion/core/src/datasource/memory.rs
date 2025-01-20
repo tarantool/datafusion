@@ -38,8 +38,8 @@ use crate::physical_planner::create_physical_sort_exprs;
 use arrow::datatypes::SchemaRef;
 use arrow::record_batch::RecordBatch;
 use datafusion_common::{not_impl_err, plan_err, Constraints, DFSchema, SchemaExt};
+use datafusion_execution::metrics::MetricsSet;
 use datafusion_execution::TaskContext;
-use datafusion_physical_plan::metrics::MetricsSet;
 
 use async_trait::async_trait;
 use datafusion_catalog::Session;

@@ -81,7 +81,7 @@ use datafusion_physical_expr::expressions::{Column, Literal};
 use datafusion_physical_expr::utils::reassign_predicate_columns;
 use datafusion_physical_expr::{split_conjunction, PhysicalExpr};
 
-use crate::physical_plan::metrics;
+use datafusion_execution::metrics;
 
 use super::ParquetFileMetrics;
 
@@ -294,7 +294,7 @@ impl<'a> FilterCandidateBuilder<'a> {
 /// Implement the `TreeNodeRewriter` trait for `FilterCandidateBuilder` that
 /// walks the expression tree and rewrites it in preparation of becoming
 /// `FilterCandidate`.
-impl<'a> TreeNodeRewriter for FilterCandidateBuilder<'a> {
+impl TreeNodeRewriter for FilterCandidateBuilder<'_> {
     type Node = Arc<dyn PhysicalExpr>;
 
     /// Called before visiting each child
@@ -490,9 +490,9 @@ mod test {
 
     use arrow::datatypes::Field;
     use arrow_schema::TimeUnit::Nanosecond;
+    use datafusion_execution::metrics::{Count, Time};
     use datafusion_expr::{cast, col, lit, Expr};
     use datafusion_physical_expr::planner::logical2physical;
-    use datafusion_physical_plan::metrics::{Count, Time};
 
     use parquet::arrow::arrow_reader::ParquetRecordBatchReaderBuilder;
     use parquet::arrow::parquet_to_arrow_schema;

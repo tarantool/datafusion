@@ -52,10 +52,10 @@ use datafusion_common::{
 };
 use datafusion_common_runtime::SpawnedTask;
 use datafusion_execution::memory_pool::{MemoryConsumer, MemoryPool, MemoryReservation};
+use datafusion_execution::metrics::MetricsSet;
 use datafusion_execution::TaskContext;
 use datafusion_functions_aggregate::min_max::{MaxAccumulator, MinAccumulator};
 use datafusion_physical_expr::PhysicalExpr;
-use datafusion_physical_plan::metrics::MetricsSet;
 
 use async_trait::async_trait;
 use bytes::{BufMut, BytesMut};
@@ -1269,7 +1269,6 @@ mod tests {
     use super::*;
 
     use crate::datasource::file_format::parquet::test_util::store_parquet;
-    use crate::physical_plan::metrics::MetricValue;
     use crate::prelude::{SessionConfig, SessionContext};
     use arrow::array::{Array, ArrayRef, StringArray};
     use arrow_array::types::Int32Type;
@@ -1283,6 +1282,7 @@ mod tests {
     use datafusion_common::config::ParquetOptions;
     use datafusion_common::ScalarValue;
     use datafusion_common::ScalarValue::Utf8;
+    use datafusion_execution::metrics::MetricValue;
     use datafusion_execution::object_store::ObjectStoreUrl;
     use datafusion_execution::runtime_env::RuntimeEnv;
     use datafusion_physical_plan::stream::RecordBatchStreamAdapter;
@@ -1773,10 +1773,10 @@ mod tests {
         let task_ctx = ctx.task_ctx();
 
         let _ = collect(exec.clone(), task_ctx.clone()).await?;
-        let _ = collect(exec_projected.clone(), task_ctx).await?;
+        let _ = collect(exec_projected.clone(), Arc::clone(&task_ctx)).await?;
 
-        assert_bytes_scanned(exec, 671);
-        assert_bytes_scanned(exec_projected, 73);
+        assert_bytes_scanned(exec, 671, &task_ctx);
+        assert_bytes_scanned(exec_projected, 73, &task_ctx);
 
         Ok(())
     }
@@ -2182,9 +2182,12 @@ mod tests {
         }
     }
 
-    fn assert_bytes_scanned(exec: Arc<dyn ExecutionPlan>, expected: usize) {
-        let actual = exec
-            .metrics()
+    fn assert_bytes_scanned(
+        exec: Arc<dyn ExecutionPlan>,
+        expected: usize,
+        ctx: &Arc<TaskContext>,
+    ) {
+        let actual = ctx.plan_metrics(exec.as_any())
             .expect("Metrics not recorded")
             .sum(|metric| matches!(metric.value(), MetricValue::Count { name, .. } if name == "bytes_scanned"))
             .map(|t| t.as_usize())

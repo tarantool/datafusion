@@ -23,7 +23,6 @@ use std::pin::Pin;
 use std::sync::Arc;
 use std::task::{ready, Context, Poll};
 
-use crate::metrics::BaselineMetrics;
 use crate::sorts::builder::BatchBuilder;
 use crate::sorts::cursor::{Cursor, CursorValues};
 use crate::sorts::stream::PartitionedStream;
@@ -34,6 +33,7 @@ use arrow::record_batch::RecordBatch;
 use datafusion_common::Result;
 use datafusion_execution::memory_pool::MemoryReservation;
 
+use datafusion_execution::metrics::BaselineMetrics;
 use futures::Stream;
 
 /// A fallible [`PartitionedStream`] of [`Cursor`] and [`RecordBatch`]

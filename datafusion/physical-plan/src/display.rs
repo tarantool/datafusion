@@ -18,12 +18,13 @@
 //! Implementation of physical plan display. See
 //! [`crate::displayable`] for examples of how to format
 
-use std::fmt;
 use std::fmt::Formatter;
+use std::{fmt, sync::Arc};
 
 use arrow_schema::SchemaRef;
 
 use datafusion_common::display::{GraphvizBuilder, PlanType, StringifiedPlan};
+use datafusion_execution::TaskContext;
 use datafusion_expr::display_schema;
 use datafusion_physical_expr::{LexOrdering, PhysicalSortExpr};
 
@@ -48,6 +49,9 @@ pub struct DisplayableExecutionPlan<'a> {
     show_statistics: bool,
     /// If schema should be displayed. See [`Self::set_show_schema`]
     show_schema: bool,
+    /// Task context for metrics resolving.
+    /// Must be provided if metrics are required.
+    task_ctx: Option<Arc<TaskContext>>,
 }
 
 impl<'a> DisplayableExecutionPlan<'a> {
@@ -59,30 +63,39 @@ impl<'a> DisplayableExecutionPlan<'a> {
             show_metrics: ShowMetrics::None,
             show_statistics: false,
             show_schema: false,
+            task_ctx: None,
         }
     }
 
     /// Create a wrapper around an [`ExecutionPlan`] which can be
     /// pretty printed in a variety of ways that also shows aggregated
     /// metrics
-    pub fn with_metrics(inner: &'a dyn ExecutionPlan) -> Self {
+    pub fn with_metrics(
+        inner: &'a dyn ExecutionPlan,
+        task_ctx: Arc<TaskContext>,
+    ) -> Self {
         Self {
             inner,
             show_metrics: ShowMetrics::Aggregated,
             show_statistics: false,
             show_schema: false,
+            task_ctx: Some(task_ctx),
         }
     }
 
     /// Create a wrapper around an [`ExecutionPlan`] which can be
     /// pretty printed in a variety of ways that also shows all low
     /// level metrics
-    pub fn with_full_metrics(inner: &'a dyn ExecutionPlan) -> Self {
+    pub fn with_full_metrics(
+        inner: &'a dyn ExecutionPlan,
+        task_ctx: Arc<TaskContext>,
+    ) -> Self {
         Self {
             inner,
             show_metrics: ShowMetrics::Full,
             show_statistics: false,
             show_schema: false,
+            task_ctx: Some(task_ctx),
         }
     }
 
@@ -123,6 +136,7 @@ impl<'a> DisplayableExecutionPlan<'a> {
             show_metrics: ShowMetrics,
             show_statistics: bool,
             show_schema: bool,
+            task_ctx: Option<Arc<TaskContext>>,
         }
         impl<'a> fmt::Display for Wrapper<'a> {
             fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
@@ -133,6 +147,7 @@ impl<'a> DisplayableExecutionPlan<'a> {
                     show_metrics: self.show_metrics,
                     show_statistics: self.show_statistics,
                     show_schema: self.show_schema,
+                    task_ctx: self.task_ctx.clone(),
                 };
                 accept(self.plan, &mut visitor)
             }
@@ -143,6 +158,7 @@ impl<'a> DisplayableExecutionPlan<'a> {
             show_metrics: self.show_metrics,
             show_statistics: self.show_statistics,
             show_schema: self.show_schema,
+            task_ctx: self.task_ctx.clone(),
         }
     }
 
@@ -162,6 +178,7 @@ impl<'a> DisplayableExecutionPlan<'a> {
             plan: &'a dyn ExecutionPlan,
             show_metrics: ShowMetrics,
             show_statistics: bool,
+            task_ctx: Option<Arc<TaskContext>>,
         }
         impl<'a> fmt::Display for Wrapper<'a> {
             fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
@@ -174,6 +191,7 @@ impl<'a> DisplayableExecutionPlan<'a> {
                     show_statistics: self.show_statistics,
                     graphviz_builder: GraphvizBuilder::default(),
                     parents: Vec::new(),
+                    task_ctx: self.task_ctx.clone(),
                 };
 
                 visitor.start_graph()?;
@@ -189,6 +207,7 @@ impl<'a> DisplayableExecutionPlan<'a> {
             plan: self.inner,
             show_metrics: self.show_metrics,
             show_statistics: self.show_statistics,
+            task_ctx: self.task_ctx.clone(),
         }
     }
 
@@ -200,6 +219,7 @@ impl<'a> DisplayableExecutionPlan<'a> {
             show_metrics: ShowMetrics,
             show_statistics: bool,
             show_schema: bool,
+            task_ctx: Option<Arc<TaskContext>>,
         }
 
         impl<'a> fmt::Display for Wrapper<'a> {
@@ -211,6 +231,7 @@ impl<'a> DisplayableExecutionPlan<'a> {
                     show_metrics: self.show_metrics,
                     show_statistics: self.show_statistics,
                     show_schema: self.show_schema,
+                    task_ctx: self.task_ctx.clone(),
                 };
                 visitor.pre_visit(self.plan)?;
                 Ok(())
@@ -222,6 +243,7 @@ impl<'a> DisplayableExecutionPlan<'a> {
             show_metrics: self.show_metrics,
             show_statistics: self.show_statistics,
             show_schema: self.show_schema,
+            task_ctx: self.task_ctx.clone(),
         }
     }
 
@@ -265,6 +287,9 @@ struct IndentVisitor<'a, 'b> {
     show_statistics: bool,
     /// If schema should be displayed
     show_schema: bool,
+    /// Task context.
+    /// Must be filled if metrics are required.
+    task_ctx: Option<Arc<TaskContext>>,
 }
 
 impl<'a, 'b> ExecutionPlanVisitor for IndentVisitor<'a, 'b> {
@@ -275,7 +300,8 @@ impl<'a, 'b> ExecutionPlanVisitor for IndentVisitor<'a, 'b> {
         match self.show_metrics {
             ShowMetrics::None => {}
             ShowMetrics::Aggregated => {
-                if let Some(metrics) = plan.metrics() {
+                let task_ctx = self.task_ctx.as_ref().expect("task ctx filled");
+                if let Some(metrics) = task_ctx.plan_metrics(plan.as_any()) {
                     let metrics = metrics
                         .aggregate_by_name()
                         .sorted_for_display()
@@ -287,7 +313,8 @@ impl<'a, 'b> ExecutionPlanVisitor for IndentVisitor<'a, 'b> {
                 }
             }
             ShowMetrics::Full => {
-                if let Some(metrics) = plan.metrics() {
+                let task_ctx = self.task_ctx.as_ref().expect("task ctx filled");
+                if let Some(metrics) = task_ctx.plan_metrics(plan.as_any()) {
                     write!(self.f, ", metrics=[{metrics}]")?;
                 } else {
                     write!(self.f, ", metrics=[]")?;
@@ -328,6 +355,7 @@ struct GraphvizVisitor<'a, 'b> {
     graphviz_builder: GraphvizBuilder,
     /// Used to record parent node ids when visiting a plan.
     parents: Vec<usize>,
+    task_ctx: Option<Arc<TaskContext>>,
 }
 
 impl GraphvizVisitor<'_, '_> {
@@ -359,7 +387,8 @@ impl ExecutionPlanVisitor for GraphvizVisitor<'_, '_> {
         let metrics = match self.show_metrics {
             ShowMetrics::None => "".to_string(),
             ShowMetrics::Aggregated => {
-                if let Some(metrics) = plan.metrics() {
+                let task_ctx = self.task_ctx.as_ref().expect("task ctx filled");
+                if let Some(metrics) = task_ctx.plan_metrics(plan.as_any()) {
                     let metrics = metrics
                         .aggregate_by_name()
                         .sorted_for_display()
@@ -371,7 +400,8 @@ impl ExecutionPlanVisitor for GraphvizVisitor<'_, '_> {
                 }
             }
             ShowMetrics::Full => {
-                if let Some(metrics) = plan.metrics() {
+                let task_ctx = self.task_ctx.as_ref().expect("task ctx filled");
+                if let Some(metrics) = task_ctx.plan_metrics(plan.as_any()) {
                     format!("metrics=[{metrics}]")
                 } else {
                     "metrics=[]".to_string()

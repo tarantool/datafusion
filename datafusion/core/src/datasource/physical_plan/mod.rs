@@ -136,7 +136,7 @@ impl DisplayAs for FileScanConfig {
 #[derive(Debug)]
 struct FileGroupsDisplay<'a>(&'a [Vec<PartitionedFile>]);
 
-impl<'a> DisplayAs for FileGroupsDisplay<'a> {
+impl DisplayAs for FileGroupsDisplay<'_> {
     fn fmt_as(&self, t: DisplayFormatType, f: &mut Formatter) -> FmtResult {
         let n_groups = self.0.len();
         let groups = if n_groups == 1 { "group" } else { "groups" };
@@ -168,7 +168,7 @@ impl<'a> DisplayAs for FileGroupsDisplay<'a> {
 #[derive(Debug)]
 pub(crate) struct FileGroupDisplay<'a>(pub &'a [PartitionedFile]);
 
-impl<'a> DisplayAs for FileGroupDisplay<'a> {
+impl DisplayAs for FileGroupDisplay<'_> {
     fn fmt_as(&self, t: DisplayFormatType, f: &mut Formatter) -> FmtResult {
         write!(f, "[")?;
         match t {

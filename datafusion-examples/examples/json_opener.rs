@@ -27,7 +27,7 @@ use datafusion::{
         physical_plan::{FileScanConfig, FileStream, JsonOpener},
     },
     error::Result,
-    physical_plan::metrics::ExecutionPlanMetricsSet,
+    execution::metrics::ExecutionPlanMetricsSet,
 };
 
 use futures::StreamExt;

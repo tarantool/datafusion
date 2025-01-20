@@ -31,11 +31,11 @@ use datafusion::datasource::physical_plan::{
     FileMeta, FileScanConfig, ParquetExec, ParquetFileMetrics, ParquetFileReaderFactory,
 };
 use datafusion::physical_plan::collect;
-use datafusion::physical_plan::metrics::ExecutionPlanMetricsSet;
 use datafusion::prelude::SessionContext;
 use datafusion_common::Result;
 
 use bytes::Bytes;
+use datafusion_execution::metrics::ExecutionPlanMetricsSet;
 use futures::future::BoxFuture;
 use futures::{FutureExt, TryFutureExt};
 use object_store::memory::InMemory;

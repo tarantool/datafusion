@@ -196,6 +196,7 @@ impl ExecutionPlan for AnalyzeExec {
                 duration,
                 captured_input,
                 captured_schema,
+                Arc::clone(&context),
             )
         };
 
@@ -214,6 +215,7 @@ fn create_output_batch(
     duration: std::time::Duration,
     input: Arc<dyn ExecutionPlan>,
     schema: SchemaRef,
+    task_ctx: Arc<TaskContext>,
 ) -> Result<RecordBatch> {
     let mut type_builder = StringBuilder::with_capacity(1, 1024);
     let mut plan_builder = StringBuilder::with_capacity(1, 1024);
@@ -221,10 +223,11 @@ fn create_output_batch(
     // TODO use some sort of enum rather than strings?
     type_builder.append_value("Plan with Metrics");
 
-    let annotated_plan = DisplayableExecutionPlan::with_metrics(input.as_ref())
-        .set_show_statistics(show_statistics)
-        .indent(verbose)
-        .to_string();
+    let annotated_plan =
+        DisplayableExecutionPlan::with_metrics(input.as_ref(), Arc::clone(&task_ctx))
+            .set_show_statistics(show_statistics)
+            .indent(verbose)
+            .to_string();
     plan_builder.append_value(annotated_plan);
 
     // Verbose output
@@ -232,10 +235,13 @@ fn create_output_batch(
     if verbose {
         type_builder.append_value("Plan with Full Metrics");
 
-        let annotated_plan = DisplayableExecutionPlan::with_full_metrics(input.as_ref())
-            .set_show_statistics(show_statistics)
-            .indent(verbose)
-            .to_string();
+        let annotated_plan = DisplayableExecutionPlan::with_full_metrics(
+            input.as_ref(),
+            Arc::clone(&task_ctx),
+        )
+        .set_show_statistics(show_statistics)
+        .indent(verbose)
+        .to_string();
         plan_builder.append_value(annotated_plan);
 
         type_builder.append_value("Output Rows");

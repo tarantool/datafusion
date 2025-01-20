@@ -23,6 +23,7 @@ pub mod cache;
 pub mod config;
 pub mod disk_manager;
 pub mod memory_pool;
+pub mod metrics;
 pub mod object_store;
 pub mod runtime_env;
 mod stream;
@@ -35,6 +36,7 @@ pub mod registry {
 }
 
 pub use disk_manager::DiskManager;
+pub use metrics::Metric;
 pub use registry::FunctionRegistry;
 pub use stream::{RecordBatchStream, SendableRecordBatchStream};
 pub use task::TaskContext;

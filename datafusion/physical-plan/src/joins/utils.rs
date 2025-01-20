@@ -24,7 +24,6 @@ use std::ops::{IndexMut, Range};
 use std::sync::Arc;
 use std::task::{Context, Poll};
 
-use crate::metrics::{self, ExecutionPlanMetricsSet, MetricBuilder};
 use crate::{
     ColumnStatistics, ExecutionPlan, ExecutionPlanProperties, Partitioning, Statistics,
 };
@@ -45,6 +44,7 @@ use datafusion_common::tree_node::{Transformed, TransformedResult, TreeNode};
 use datafusion_common::{
     plan_err, DataFusionError, JoinSide, JoinType, ParamValues, Result, SharedResult,
 };
+use datafusion_execution::metrics::{self, ExecutionPlanMetricsSet, MetricBuilder};
 use datafusion_expr::interval_arithmetic::Interval;
 use datafusion_physical_expr::equivalence::add_offset_to_expr;
 use datafusion_physical_expr::expressions::{resolve_placeholders, Column};

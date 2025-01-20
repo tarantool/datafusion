@@ -22,7 +22,6 @@ use std::sync::Arc;
 
 use super::FileScanConfig;
 use crate::error::Result;
-use crate::physical_plan::metrics::{ExecutionPlanMetricsSet, MetricsSet};
 use crate::physical_plan::{
     DisplayAs, DisplayFormatType, ExecutionMode, ExecutionPlan, Partitioning,
     PlanProperties, SendableRecordBatchStream, Statistics,
@@ -40,8 +39,6 @@ pub struct AvroExec {
     projected_statistics: Statistics,
     projected_schema: SchemaRef,
     projected_output_ordering: Vec<LexOrdering>,
-    /// Execution metrics
-    metrics: ExecutionPlanMetricsSet,
     cache: PlanProperties,
 }
 
@@ -60,7 +57,6 @@ impl AvroExec {
             projected_schema,
             projected_statistics,
             projected_output_ordering,
-            metrics: ExecutionPlanMetricsSet::new(),
             cache,
         }
     }
@@ -152,17 +148,18 @@ impl ExecutionPlan for AvroExec {
         });
         let opener = private::AvroOpener { config };
 
-        let stream =
-            FileStream::new(&self.base_config, partition, opener, &self.metrics)?;
-        Ok(Box::pin(stream))
+        let metrics = context.get_or_register_metric_set(self);
+
+        Ok(Box::pin(FileStream::new(
+            &self.base_config,
+            partition,
+            opener,
+            &metrics,
+        )?))
     }
 
     fn statistics(&self) -> Result<Statistics> {
         Ok(self.projected_statistics.clone())
-    }
-
-    fn metrics(&self) -> Option<MetricsSet> {
-        Some(self.metrics.clone_inner())
     }
 
     fn fetch(&self) -> Option<usize> {
@@ -177,7 +174,6 @@ impl ExecutionPlan for AvroExec {
             projected_statistics: self.projected_statistics.clone(),
             projected_schema: self.projected_schema.clone(),
             projected_output_ordering: self.projected_output_ordering.clone(),
-            metrics: self.metrics.clone(),
             cache: self.cache.clone(),
         }))
     }

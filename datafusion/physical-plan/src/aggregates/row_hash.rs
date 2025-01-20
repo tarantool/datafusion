@@ -27,16 +27,12 @@ use crate::aggregates::{
     evaluate_group_by, evaluate_many, evaluate_optional, group_schema, AggregateMode,
     PhysicalGroupBy,
 };
-use crate::metrics::{
-    BaselineMetrics, ExecutionPlanMetricsSet, MetricBuilder, RecordOutput,
-};
+
 use crate::sorts::sort::sort_batch;
 use crate::sorts::streaming_merge;
 use crate::spill::{read_spill_as_stream, spill_record_batch_by_size};
 use crate::stream::RecordBatchStreamAdapter;
-use crate::{
-    aggregates, metrics, ExecutionPlan, InputOrderMode, PhysicalExpr, PlanProperties,
-};
+use crate::{aggregates, ExecutionPlan, InputOrderMode, PhysicalExpr, PlanProperties};
 use crate::{RecordBatchStream, SendableRecordBatchStream};
 
 use arrow::array::*;
@@ -46,6 +42,9 @@ use datafusion_common::{internal_datafusion_err, DataFusionError, Result};
 use datafusion_execution::disk_manager::RefCountedTempFile;
 use datafusion_execution::memory_pool::proxy::VecAllocExt;
 use datafusion_execution::memory_pool::{MemoryConsumer, MemoryReservation};
+use datafusion_execution::metrics::{
+    self, BaselineMetrics, ExecutionPlanMetricsSet, MetricBuilder, RecordOutput,
+};
 use datafusion_execution::runtime_env::RuntimeEnv;
 use datafusion_execution::TaskContext;
 use datafusion_expr::{EmitTo, GroupsAccumulator};

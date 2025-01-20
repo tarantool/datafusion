@@ -967,7 +967,7 @@ impl SessionContext {
         Ok(table)
     }
 
-    async fn find_and_deregister<'a>(
+    async fn find_and_deregister(
         &self,
         table_ref: impl Into<TableReference>,
         table_type: TableType,
@@ -1361,10 +1361,7 @@ impl SessionContext {
     /// provided reference.
     ///
     /// [`register_table`]: SessionContext::register_table
-    pub async fn table<'a>(
-        &self,
-        table_ref: impl Into<TableReference>,
-    ) -> Result<DataFrame> {
+    pub async fn table(&self, table_ref: impl Into<TableReference>) -> Result<DataFrame> {
         let table_ref: TableReference = table_ref.into();
         let provider = self.table_provider(table_ref.clone()).await?;
         let plan = LogicalPlanBuilder::scan(
@@ -1391,7 +1388,7 @@ impl SessionContext {
     }
 
     /// Return a [`TableProvider`] for the specified table.
-    pub async fn table_provider<'a>(
+    pub async fn table_provider(
         &self,
         table_ref: impl Into<TableReference>,
     ) -> Result<Arc<dyn TableProvider>> {
@@ -1641,7 +1638,7 @@ impl<'a> BadPlanVisitor<'a> {
     }
 }
 
-impl<'n, 'a> TreeNodeVisitor<'n> for BadPlanVisitor<'a> {
+impl<'n> TreeNodeVisitor<'n> for BadPlanVisitor<'_> {
     type Node = LogicalPlan;
 
     fn f_down(&mut self, node: &'n Self::Node) -> Result<TreeNodeRecursion> {

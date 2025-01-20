@@ -58,7 +58,6 @@ use std::sync::Arc;
 use std::task::{Context, Poll};
 
 use crate::expressions::PhysicalSortExpr;
-use crate::metrics::{BaselineMetrics, ExecutionPlanMetricsSet, MetricsSet};
 use crate::sorts::sort::sort_batch;
 use crate::{
     DisplayAs, DisplayFormatType, Distribution, ExecutionPlan, ExecutionPlanProperties,
@@ -70,6 +69,7 @@ use arrow::datatypes::SchemaRef;
 use arrow::record_batch::RecordBatch;
 use datafusion_common::utils::evaluate_partition_ranges;
 use datafusion_common::Result;
+use datafusion_execution::metrics::BaselineMetrics;
 use datafusion_execution::{RecordBatchStream, TaskContext};
 use datafusion_physical_expr::LexOrdering;
 
@@ -86,8 +86,6 @@ pub struct PartialSortExec {
     /// Length of continuous matching columns of input that satisfy
     /// the required ordering for the sort
     common_prefix_length: usize,
-    /// Containing all metrics set created during sort
-    metrics_set: ExecutionPlanMetricsSet,
     /// Preserve partitions of input plan. If false, the input partitions
     /// will be sorted and merged into a single output partition.
     preserve_partitioning: bool,
@@ -111,7 +109,6 @@ impl PartialSortExec {
             input,
             expr,
             common_prefix_length,
-            metrics_set: ExecutionPlanMetricsSet::new(),
             preserve_partitioning,
             fetch: None,
             cache,
@@ -291,19 +288,19 @@ impl ExecutionPlan for PartialSortExec {
         // Otherwise, we should use SortExec.
         assert!(self.common_prefix_length > 0);
 
-        Ok(Box::pin(PartialSortStream {
+        let metrics = context.get_or_register_metric_set(self);
+
+        let stream = PartialSortStream {
             input,
             expr: self.expr.clone(),
             common_prefix_length: self.common_prefix_length,
             in_mem_batches: vec![],
             fetch: self.fetch,
             is_closed: false,
-            baseline_metrics: BaselineMetrics::new(&self.metrics_set, partition),
-        }))
-    }
+            baseline_metrics: BaselineMetrics::new(&metrics, partition),
+        };
 
-    fn metrics(&self) -> Option<MetricsSet> {
-        Some(self.metrics_set.clone_inner())
+        Ok(Box::pin(stream))
     }
 
     fn statistics(&self) -> Result<Statistics> {
@@ -971,12 +968,13 @@ mod tests {
 
         let result: Vec<RecordBatch> = collect(
             Arc::clone(&partial_sort_exec) as Arc<dyn ExecutionPlan>,
-            task_ctx,
+            Arc::clone(&task_ctx),
         )
         .await?;
         assert_batches_eq!(expected, &result);
         assert_eq!(result.len(), 2);
-        let metrics = partial_sort_exec.metrics().unwrap();
+
+        let metrics = task_ctx.plan_metrics(partial_sort_exec.as_any()).unwrap();
         assert!(metrics.elapsed_compute().unwrap() > 0);
         assert_eq!(metrics.output_rows().unwrap(), 8);
 

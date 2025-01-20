@@ -38,6 +38,9 @@ use arrow::datatypes::{DataType, SchemaRef, TimeUnit};
 use arrow::error::ArrowError;
 use arrow::ipc::reader::FileReader;
 use arrow_array::types::UInt64Type;
+use datafusion_execution::metrics::{
+    self, Count, ExecutionPlanMetricsSet, MetricBuilder,
+};
 use futures::{Stream, StreamExt};
 use hashbrown::HashSet;
 
@@ -58,10 +61,9 @@ use crate::joins::utils::{
     build_join_schema, check_join_is_valid, estimate_join_statistics,
     symmetric_join_output_partitioning, JoinFilter, JoinOn, JoinOnRef,
 };
-use crate::metrics::{Count, ExecutionPlanMetricsSet, MetricBuilder, MetricsSet};
 use crate::spill::spill_record_batches;
 use crate::{
-    execution_mode_from_children, metrics, DisplayAs, DisplayFormatType, Distribution,
+    execution_mode_from_children, DisplayAs, DisplayFormatType, Distribution,
     ExecutionPlan, ExecutionPlanProperties, PhysicalExpr, PlanProperties,
     RecordBatchStream, SendableRecordBatchStream, Statistics,
 };
@@ -82,8 +84,6 @@ pub struct SortMergeJoinExec {
     pub join_type: JoinType,
     /// The schema once the join is applied
     schema: SchemaRef,
-    /// Execution metrics
-    metrics: ExecutionPlanMetricsSet,
     /// The left SortExpr
     left_sort_exprs: Vec<PhysicalSortExpr>,
     /// The right SortExpr
@@ -155,7 +155,6 @@ impl SortMergeJoinExec {
             filter,
             join_type,
             schema,
-            metrics: ExecutionPlanMetricsSet::new(),
             left_sort_exprs,
             right_sort_exprs,
             sort_options,
@@ -377,6 +376,8 @@ impl ExecutionPlan for SortMergeJoinExec {
             None
         };
 
+        let metrics = context.get_or_register_metric_set(self);
+
         // create join stream
         Ok(Box::pin(SMJStream::try_new(
             Arc::clone(&self.schema),
@@ -389,14 +390,10 @@ impl ExecutionPlan for SortMergeJoinExec {
             resolved_filter,
             self.join_type,
             batch_size,
-            SortMergeJoinMetrics::new(partition, &self.metrics),
+            SortMergeJoinMetrics::new(partition, &metrics),
             reservation,
             context.runtime_env(),
         )?))
-    }
-
-    fn metrics(&self) -> Option<MetricsSet> {
-        Some(self.metrics.clone_inner())
     }
 
     fn statistics(&self) -> Result<Statistics> {
@@ -2930,16 +2927,17 @@ mod tests {
                 false,
             )?;
 
-            let stream = join.execute(0, task_ctx)?;
+            let stream = join.execute(0, Arc::clone(&task_ctx))?;
             let err = common::collect(stream).await.unwrap_err();
 
             assert_contains!(err.to_string(), "Failed to allocate additional");
             assert_contains!(err.to_string(), "SMJStream[0]");
             assert_contains!(err.to_string(), "Disk spilling disabled");
-            assert!(join.metrics().is_some());
-            assert_eq!(join.metrics().unwrap().spill_count(), Some(0));
-            assert_eq!(join.metrics().unwrap().spilled_bytes(), Some(0));
-            assert_eq!(join.metrics().unwrap().spilled_rows(), Some(0));
+
+            let metrics = task_ctx.plan_metrics(join.as_any()).unwrap();
+            assert_eq!(metrics.spill_count(), Some(0));
+            assert_eq!(metrics.spilled_bytes(), Some(0));
+            assert_eq!(metrics.spilled_rows(), Some(0));
         }
 
         Ok(())
@@ -3014,16 +3012,17 @@ mod tests {
                 false,
             )?;
 
-            let stream = join.execute(0, task_ctx)?;
+            let stream = join.execute(0, Arc::clone(&task_ctx))?;
             let err = common::collect(stream).await.unwrap_err();
 
             assert_contains!(err.to_string(), "Failed to allocate additional");
             assert_contains!(err.to_string(), "SMJStream[0]");
             assert_contains!(err.to_string(), "Disk spilling disabled");
-            assert!(join.metrics().is_some());
-            assert_eq!(join.metrics().unwrap().spill_count(), Some(0));
-            assert_eq!(join.metrics().unwrap().spilled_bytes(), Some(0));
-            assert_eq!(join.metrics().unwrap().spilled_rows(), Some(0));
+
+            let metrics = task_ctx.plan_metrics(join.as_any()).unwrap();
+            assert_eq!(metrics.spill_count(), Some(0));
+            assert_eq!(metrics.spilled_bytes(), Some(0));
+            assert_eq!(metrics.spilled_rows(), Some(0));
         }
 
         Ok(())
@@ -3080,13 +3079,13 @@ mod tests {
                     false,
                 )?;
 
-                let stream = join.execute(0, task_ctx)?;
+                let stream = join.execute(0, Arc::clone(&task_ctx))?;
                 let spilled_join_result = common::collect(stream).await.unwrap();
 
-                assert!(join.metrics().is_some());
-                assert!(join.metrics().unwrap().spill_count().unwrap() > 0);
-                assert!(join.metrics().unwrap().spilled_bytes().unwrap() > 0);
-                assert!(join.metrics().unwrap().spilled_rows().unwrap() > 0);
+                let metrics = task_ctx.plan_metrics(join.as_any()).unwrap();
+                assert!(metrics.spill_count().unwrap() > 0);
+                assert!(metrics.spilled_bytes().unwrap() > 0);
+                assert!(metrics.spilled_rows().unwrap() > 0);
 
                 // Run the test with no spill configuration as
                 let task_ctx_no_spill =
@@ -3101,13 +3100,13 @@ mod tests {
                     sort_options.clone(),
                     false,
                 )?;
-                let stream = join.execute(0, task_ctx_no_spill)?;
+                let stream = join.execute(0, Arc::clone(&task_ctx_no_spill))?;
                 let no_spilled_join_result = common::collect(stream).await.unwrap();
 
-                assert!(join.metrics().is_some());
-                assert_eq!(join.metrics().unwrap().spill_count(), Some(0));
-                assert_eq!(join.metrics().unwrap().spilled_bytes(), Some(0));
-                assert_eq!(join.metrics().unwrap().spilled_rows(), Some(0));
+                let metrics = task_ctx_no_spill.plan_metrics(join.as_any()).unwrap();
+                assert_eq!(metrics.spill_count(), Some(0));
+                assert_eq!(metrics.spilled_bytes(), Some(0));
+                assert_eq!(metrics.spilled_rows(), Some(0));
                 // Compare spilled and non spilled data to check spill logic doesn't corrupt the data
                 assert_eq!(spilled_join_result, no_spilled_join_result);
             }
@@ -3187,12 +3186,13 @@ mod tests {
                     false,
                 )?;
 
-                let stream = join.execute(0, task_ctx)?;
+                let stream = join.execute(0, Arc::clone(&task_ctx))?;
                 let spilled_join_result = common::collect(stream).await.unwrap();
-                assert!(join.metrics().is_some());
-                assert!(join.metrics().unwrap().spill_count().unwrap() > 0);
-                assert!(join.metrics().unwrap().spilled_bytes().unwrap() > 0);
-                assert!(join.metrics().unwrap().spilled_rows().unwrap() > 0);
+
+                let metrics = task_ctx.plan_metrics(join.as_any()).unwrap();
+                assert!(metrics.spill_count().unwrap() > 0);
+                assert!(metrics.spilled_bytes().unwrap() > 0);
+                assert!(metrics.spilled_rows().unwrap() > 0);
 
                 // Run the test with no spill configuration as
                 let task_ctx_no_spill =
@@ -3207,13 +3207,13 @@ mod tests {
                     sort_options.clone(),
                     false,
                 )?;
-                let stream = join.execute(0, task_ctx_no_spill)?;
+                let stream = join.execute(0, Arc::clone(&task_ctx_no_spill))?;
                 let no_spilled_join_result = common::collect(stream).await.unwrap();
 
-                assert!(join.metrics().is_some());
-                assert_eq!(join.metrics().unwrap().spill_count(), Some(0));
-                assert_eq!(join.metrics().unwrap().spilled_bytes(), Some(0));
-                assert_eq!(join.metrics().unwrap().spilled_rows(), Some(0));
+                let metrics = task_ctx_no_spill.plan_metrics(join.as_any()).unwrap();
+                assert_eq!(metrics.spill_count(), Some(0));
+                assert_eq!(metrics.spilled_bytes(), Some(0));
+                assert_eq!(metrics.spilled_rows(), Some(0));
                 // Compare spilled and non spilled data to check spill logic doesn't corrupt the data
                 assert_eq!(spilled_join_result, no_spilled_join_result);
             }

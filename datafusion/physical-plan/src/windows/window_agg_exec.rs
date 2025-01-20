@@ -24,7 +24,6 @@ use std::task::{Context, Poll};
 
 use super::utils::create_schema;
 use crate::expressions::PhysicalSortExpr;
-use crate::metrics::{BaselineMetrics, ExecutionPlanMetricsSet, MetricsSet};
 use crate::windows::{
     calc_requirements, get_ordered_partition_by_indices, get_partition_by_sort_exprs,
     window_equivalence_properties,
@@ -42,6 +41,7 @@ use arrow::record_batch::RecordBatch;
 use datafusion_common::stats::Precision;
 use datafusion_common::utils::{evaluate_partition_ranges, transpose};
 use datafusion_common::{internal_err, Result};
+use datafusion_execution::metrics::BaselineMetrics;
 use datafusion_execution::TaskContext;
 use datafusion_physical_expr_common::sort_expr::LexRequirement;
 use futures::{ready, Stream, StreamExt};
@@ -57,8 +57,6 @@ pub struct WindowAggExec {
     schema: SchemaRef,
     /// Partition Keys
     pub partition_keys: Vec<Arc<dyn PhysicalExpr>>,
-    /// Execution metrics
-    metrics: ExecutionPlanMetricsSet,
     /// Partition by indices that defines preset for existing ordering
     // see `get_ordered_partition_by_indices` for more details.
     ordered_partition_by_indices: Vec<usize>,
@@ -84,7 +82,6 @@ impl WindowAggExec {
             window_expr,
             schema,
             partition_keys,
-            metrics: ExecutionPlanMetricsSet::new(),
             ordered_partition_by_indices,
             cache,
         })
@@ -239,20 +236,17 @@ impl ExecutionPlan for WindowAggExec {
                     .unwrap_or_else(|| Arc::clone(&e)))
             })
             .collect::<Result<_>>()?;
-        let input = self.input.execute(partition, context)?;
+        let input = self.input.execute(partition, Arc::clone(&context))?;
+        let metrics = context.get_or_register_metric_set(self);
         let stream = Box::pin(WindowAggStream::new(
             Arc::clone(&self.schema),
             window_expr,
             input,
-            BaselineMetrics::new(&self.metrics, partition),
+            BaselineMetrics::new(&metrics, partition),
             self.partition_by_sort_keys()?,
             self.ordered_partition_by_indices.clone(),
         )?);
         Ok(stream)
-    }
-
-    fn metrics(&self) -> Option<MetricsSet> {
-        Some(self.metrics.clone_inner())
     }
 
     fn statistics(&self) -> Result<Statistics> {

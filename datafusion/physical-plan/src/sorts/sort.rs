@@ -27,9 +27,6 @@ use std::sync::Arc;
 use crate::common::spawn_buffered;
 use crate::expressions::PhysicalSortExpr;
 use crate::limit::LimitStream;
-use crate::metrics::{
-    BaselineMetrics, Count, ExecutionPlanMetricsSet, MetricBuilder, MetricsSet,
-};
 use crate::sorts::streaming_merge::streaming_merge;
 use crate::spill::{read_spill_as_stream, spill_record_batches};
 use crate::stream::RecordBatchStreamAdapter;
@@ -49,6 +46,9 @@ use arrow_schema::DataType;
 use datafusion_common::{internal_err, Result};
 use datafusion_execution::disk_manager::RefCountedTempFile;
 use datafusion_execution::memory_pool::{MemoryConsumer, MemoryReservation};
+use datafusion_execution::metrics::{
+    BaselineMetrics, Count, ExecutionPlanMetricsSet, MetricBuilder,
+};
 use datafusion_execution::runtime_env::RuntimeEnv;
 use datafusion_execution::TaskContext;
 use datafusion_physical_expr::expressions::resolve_placeholders;
@@ -683,8 +683,6 @@ pub struct SortExec {
     pub(crate) input: Arc<dyn ExecutionPlan>,
     /// Sort expressions
     expr: Vec<PhysicalSortExpr>,
-    /// Containing all metrics set created during sort
-    metrics_set: ExecutionPlanMetricsSet,
     /// Preserve partitions of input plan. If false, the input partitions
     /// will be sorted and merged into a single output partition.
     preserve_partitioning: bool,
@@ -703,7 +701,6 @@ impl SortExec {
         Self {
             expr,
             input,
-            metrics_set: ExecutionPlanMetricsSet::new(),
             preserve_partitioning,
             fetch: None,
             cache,
@@ -751,7 +748,6 @@ impl SortExec {
         SortExec {
             input: Arc::clone(&self.input),
             expr: self.expr.clone(),
-            metrics_set: self.metrics_set.clone(),
             preserve_partitioning: self.preserve_partitioning,
             fetch,
             cache,
@@ -913,14 +909,15 @@ impl ExecutionPlan for SortExec {
             })
             .collect::<Result<_>>()?;
 
-        match (sort_satisfied, self.fetch.as_ref()) {
-            (true, Some(fetch)) => Ok(Box::pin(LimitStream::new(
+        let metrics = context.get_or_register_metric_set(self);
+        let stream = match (sort_satisfied, self.fetch.as_ref()) {
+            (true, Some(fetch)) => Box::pin(LimitStream::new(
                 input,
                 0,
                 Some(*fetch),
-                BaselineMetrics::new(&self.metrics_set, partition),
-            ))),
-            (true, None) => Ok(input),
+                BaselineMetrics::new(&metrics, partition),
+            )),
+            (true, None) => input,
             (false, Some(fetch)) => {
                 let mut topk = TopK::try_new(
                     partition,
@@ -929,10 +926,10 @@ impl ExecutionPlan for SortExec {
                     *fetch,
                     context.session_config().batch_size(),
                     context.runtime_env(),
-                    &self.metrics_set,
+                    &metrics,
                     partition,
                 )?;
-                Ok(Box::pin(RecordBatchStreamAdapter::new(
+                Box::pin(RecordBatchStreamAdapter::new(
                     self.schema(),
                     futures::stream::once(async move {
                         while let Some(batch) = input.next().await {
@@ -942,7 +939,7 @@ impl ExecutionPlan for SortExec {
                         topk.emit()
                     })
                     .try_flatten(),
-                )))
+                ))
             }
             (false, None) => {
                 let mut sorter = ExternalSorter::new(
@@ -953,10 +950,10 @@ impl ExecutionPlan for SortExec {
                     self.fetch,
                     execution_options.sort_spill_reservation_bytes,
                     execution_options.sort_in_place_threshold_bytes,
-                    &self.metrics_set,
+                    &metrics,
                     context.runtime_env(),
                 );
-                Ok(Box::pin(RecordBatchStreamAdapter::new(
+                Box::pin(RecordBatchStreamAdapter::new(
                     self.schema(),
                     futures::stream::once(async move {
                         while let Some(batch) = input.next().await {
@@ -966,13 +963,11 @@ impl ExecutionPlan for SortExec {
                         sorter.sort()
                     })
                     .try_flatten(),
-                )))
+                ))
             }
-        }
-    }
+        };
 
-    fn metrics(&self) -> Option<MetricsSet> {
-        Some(self.metrics_set.clone_inner())
+        Ok(stream)
     }
 
     fn statistics(&self) -> Result<Statistics> {
@@ -1194,7 +1189,7 @@ mod tests {
         assert_eq!(result.len(), 2);
 
         // Now, validate metrics
-        let metrics = sort_exec.metrics().unwrap();
+        let metrics = task_ctx.plan_metrics(sort_exec.as_any()).unwrap();
 
         assert_eq!(metrics.output_rows().unwrap(), 10000);
         assert!(metrics.elapsed_compute().unwrap() > 0);
@@ -1273,7 +1268,7 @@ mod tests {
             .await?;
             assert_eq!(result.len(), 1);
 
-            let metrics = sort_exec.metrics().unwrap();
+            let metrics = task_ctx.plan_metrics(sort_exec.as_any()).unwrap();
             let did_it_spill = metrics.spill_count().unwrap_or(0) > 0;
             assert_eq!(did_it_spill, expect_spillage, "with fetch: {fetch:?}");
         }
@@ -1386,9 +1381,12 @@ mod tests {
             *sort_exec.schema().field(1).data_type()
         );
 
-        let result: Vec<RecordBatch> =
-            collect(Arc::clone(&sort_exec) as Arc<dyn ExecutionPlan>, task_ctx).await?;
-        let metrics = sort_exec.metrics().unwrap();
+        let result: Vec<RecordBatch> = collect(
+            Arc::clone(&sort_exec) as Arc<dyn ExecutionPlan>,
+            Arc::clone(&task_ctx),
+        )
+        .await?;
+        let metrics = task_ctx.plan_metrics(sort_exec.as_any()).unwrap();
         assert!(metrics.elapsed_compute().unwrap() > 0);
         assert_eq!(metrics.output_rows().unwrap(), 4);
         assert_eq!(result.len(), 1);
@@ -1469,9 +1467,12 @@ mod tests {
         assert_eq!(DataType::Float32, *sort_exec.schema().field(0).data_type());
         assert_eq!(DataType::Float64, *sort_exec.schema().field(1).data_type());
 
-        let result: Vec<RecordBatch> =
-            collect(Arc::clone(&sort_exec) as Arc<dyn ExecutionPlan>, task_ctx).await?;
-        let metrics = sort_exec.metrics().unwrap();
+        let result: Vec<RecordBatch> = collect(
+            Arc::clone(&sort_exec) as Arc<dyn ExecutionPlan>,
+            Arc::clone(&task_ctx),
+        )
+        .await?;
+        let metrics = task_ctx.plan_metrics(sort_exec.as_any()).unwrap();
         assert!(metrics.elapsed_compute().unwrap() > 0);
         assert_eq!(metrics.output_rows().unwrap(), 8);
         assert_eq!(result.len(), 1);

@@ -46,10 +46,10 @@ use datafusion_common::parsers::CompressionTypeVariant;
 use datafusion_common::{
     not_impl_err, DataFusionError, GetExt, Statistics, DEFAULT_ARROW_EXTENSION,
 };
+use datafusion_execution::metrics::MetricsSet;
 use datafusion_execution::{SendableRecordBatchStream, TaskContext};
 use datafusion_physical_expr::PhysicalExpr;
 use datafusion_physical_plan::insert::{DataSink, DataSinkExec};
-use datafusion_physical_plan::metrics::MetricsSet;
 
 use async_trait::async_trait;
 use bytes::Bytes;

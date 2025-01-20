@@ -22,7 +22,6 @@ use std::pin::Pin;
 use std::sync::Arc;
 use std::task::{Context, Poll};
 
-use super::metrics::{BaselineMetrics, ExecutionPlanMetricsSet, MetricsSet};
 use super::{
     DisplayAs, ExecutionMode, ExecutionPlanProperties, PlanProperties, RecordBatchStream,
     SendableRecordBatchStream, Statistics,
@@ -32,6 +31,7 @@ use crate::{DisplayFormatType, Distribution, ExecutionPlan, Partitioning};
 use arrow::datatypes::SchemaRef;
 use arrow::record_batch::RecordBatch;
 use datafusion_common::{internal_err, Result};
+use datafusion_execution::metrics::BaselineMetrics;
 use datafusion_execution::TaskContext;
 
 use futures::stream::{Stream, StreamExt};
@@ -47,8 +47,6 @@ pub struct GlobalLimitExec {
     /// Maximum number of rows to fetch,
     /// `None` means fetching all rows
     fetch: Option<usize>,
-    /// Execution metrics
-    metrics: ExecutionPlanMetricsSet,
     cache: PlanProperties,
 }
 
@@ -60,7 +58,6 @@ impl GlobalLimitExec {
             input,
             skip,
             fetch,
-            metrics: ExecutionPlanMetricsSet::new(),
             cache,
         }
     }
@@ -169,18 +166,13 @@ impl ExecutionPlan for GlobalLimitExec {
             return internal_err!("GlobalLimitExec requires a single input partition");
         }
 
-        let baseline_metrics = BaselineMetrics::new(&self.metrics, partition);
-        let stream = self.input.execute(0, context)?;
-        Ok(Box::pin(LimitStream::new(
-            stream,
-            self.skip,
-            self.fetch,
-            baseline_metrics,
-        )))
-    }
+        let metrics = context.get_or_register_metric_set(self);
+        let baseline_metrics = BaselineMetrics::new(&metrics, partition);
+        let stream = self.input.execute(0, Arc::clone(&context))?;
+        let limit_stream =
+            LimitStream::new(stream, self.skip, self.fetch, baseline_metrics);
 
-    fn metrics(&self) -> Option<MetricsSet> {
-        Some(self.metrics.clone_inner())
+        Ok(Box::pin(limit_stream))
     }
 
     fn statistics(&self) -> Result<Statistics> {
@@ -209,8 +201,6 @@ pub struct LocalLimitExec {
     input: Arc<dyn ExecutionPlan>,
     /// Maximum number of rows to return
     fetch: usize,
-    /// Execution metrics
-    metrics: ExecutionPlanMetricsSet,
     cache: PlanProperties,
 }
 
@@ -221,7 +211,6 @@ impl LocalLimitExec {
         Self {
             input,
             fetch,
-            metrics: ExecutionPlanMetricsSet::new(),
             cache,
         }
     }
@@ -305,18 +294,16 @@ impl ExecutionPlan for LocalLimitExec {
         context: Arc<TaskContext>,
     ) -> Result<SendableRecordBatchStream> {
         trace!("Start LocalLimitExec::execute for partition {} of context session_id {} and task_id {:?}", partition, context.session_id(), context.task_id());
-        let baseline_metrics = BaselineMetrics::new(&self.metrics, partition);
-        let stream = self.input.execute(partition, context)?;
+        let metrics = context.get_or_register_metric_set(self);
+        let baseline_metrics = BaselineMetrics::new(&metrics, partition);
+        let stream = self.input.execute(partition, Arc::clone(&context))?;
+
         Ok(Box::pin(LimitStream::new(
             stream,
             0,
             Some(self.fetch),
             baseline_metrics,
         )))
-    }
-
-    fn metrics(&self) -> Option<MetricsSet> {
-        Some(self.metrics.clone_inner())
     }
 
     fn statistics(&self) -> Result<Statistics> {
@@ -474,6 +461,7 @@ mod tests {
     use arrow_array::RecordBatchOptions;
     use arrow_schema::Schema;
     use datafusion_common::stats::Precision;
+    use datafusion_execution::metrics::ExecutionPlanMetricsSet;
     use datafusion_physical_expr::expressions::col;
     use datafusion_physical_expr::PhysicalExpr;
 

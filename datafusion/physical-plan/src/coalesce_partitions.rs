@@ -21,7 +21,6 @@
 use std::any::Any;
 use std::sync::Arc;
 
-use super::metrics::{BaselineMetrics, ExecutionPlanMetricsSet, MetricsSet};
 use super::stream::{ObservedStream, RecordBatchReceiverStream};
 use super::{
     DisplayAs, ExecutionPlanProperties, PlanProperties, SendableRecordBatchStream,
@@ -31,6 +30,7 @@ use super::{
 use crate::{DisplayFormatType, ExecutionPlan, Partitioning};
 
 use datafusion_common::{internal_err, Result};
+use datafusion_execution::metrics::BaselineMetrics;
 use datafusion_execution::TaskContext;
 
 /// Merge execution plan executes partitions in parallel and combines them into a single
@@ -39,8 +39,6 @@ use datafusion_execution::TaskContext;
 pub struct CoalescePartitionsExec {
     /// Input execution plan
     input: Arc<dyn ExecutionPlan>,
-    /// Execution metrics
-    metrics: ExecutionPlanMetricsSet,
     cache: PlanProperties,
 }
 
@@ -48,11 +46,7 @@ impl CoalescePartitionsExec {
     /// Create a new CoalescePartitionsExec
     pub fn new(input: Arc<dyn ExecutionPlan>) -> Self {
         let cache = Self::compute_properties(&input);
-        CoalescePartitionsExec {
-            input,
-            metrics: ExecutionPlanMetricsSet::new(),
-            cache,
-        }
+        CoalescePartitionsExec { input, cache }
     }
 
     /// Input execution plan
@@ -139,7 +133,8 @@ impl ExecutionPlan for CoalescePartitionsExec {
                 self.input.execute(0, context)
             }
             _ => {
-                let baseline_metrics = BaselineMetrics::new(&self.metrics, partition);
+                let metrics = context.get_or_register_metric_set(self);
+                let baseline_metrics = BaselineMetrics::new(&metrics, partition);
                 // record the (very) minimal work done so that
                 // elapsed_compute is not reported as 0
                 let elapsed_compute = baseline_metrics.elapsed_compute().clone();
@@ -165,10 +160,6 @@ impl ExecutionPlan for CoalescePartitionsExec {
                 Ok(Box::pin(ObservedStream::new(stream, baseline_metrics)))
             }
         }
-    }
-
-    fn metrics(&self) -> Option<MetricsSet> {
-        Some(self.metrics.clone_inner())
     }
 
     fn statistics(&self) -> Result<Statistics> {

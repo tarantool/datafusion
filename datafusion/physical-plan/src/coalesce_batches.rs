@@ -22,7 +22,6 @@ use std::pin::Pin;
 use std::sync::Arc;
 use std::task::{Context, Poll};
 
-use super::metrics::{BaselineMetrics, ExecutionPlanMetricsSet, MetricsSet};
 use super::{DisplayAs, ExecutionPlanProperties, PlanProperties, Statistics};
 use crate::{
     DisplayFormatType, ExecutionPlan, RecordBatchStream, SendableRecordBatchStream,
@@ -31,6 +30,7 @@ use crate::{
 use arrow::datatypes::SchemaRef;
 use arrow::record_batch::RecordBatch;
 use datafusion_common::Result;
+use datafusion_execution::metrics::BaselineMetrics;
 use datafusion_execution::TaskContext;
 
 use crate::coalesce::{BatchCoalescer, CoalescerState};
@@ -55,8 +55,6 @@ pub struct CoalesceBatchesExec {
     target_batch_size: usize,
     /// Maximum number of rows to fetch, `None` means fetching all rows
     fetch: Option<usize>,
-    /// Execution metrics
-    metrics: ExecutionPlanMetricsSet,
     cache: PlanProperties,
 }
 
@@ -68,7 +66,6 @@ impl CoalesceBatchesExec {
             input,
             target_batch_size,
             fetch: None,
-            metrics: ExecutionPlanMetricsSet::new(),
             cache,
         }
     }
@@ -165,21 +162,19 @@ impl ExecutionPlan for CoalesceBatchesExec {
         partition: usize,
         context: Arc<TaskContext>,
     ) -> Result<SendableRecordBatchStream> {
-        Ok(Box::pin(CoalesceBatchesStream {
-            input: self.input.execute(partition, context)?,
+        let metrics = context.get_or_register_metric_set(self);
+        let stream = CoalesceBatchesStream {
+            input: self.input.execute(partition, Arc::clone(&context))?,
             coalescer: BatchCoalescer::new(
                 self.input.schema(),
                 self.target_batch_size,
                 self.fetch,
             ),
-            baseline_metrics: BaselineMetrics::new(&self.metrics, partition),
+            baseline_metrics: BaselineMetrics::new(&metrics, partition),
             // Start by pulling data
             inner_state: CoalesceBatchesStreamState::Pull,
-        }))
-    }
-
-    fn metrics(&self) -> Option<MetricsSet> {
-        Some(self.metrics.clone_inner())
+        };
+        Ok(Box::pin(stream))
     }
 
     fn statistics(&self) -> Result<Statistics> {
@@ -191,7 +186,6 @@ impl ExecutionPlan for CoalesceBatchesExec {
             input: Arc::clone(&self.input),
             target_batch_size: self.target_batch_size,
             fetch: limit,
-            metrics: self.metrics.clone(),
             cache: self.cache.clone(),
         }))
     }

@@ -21,7 +21,8 @@ use datafusion::datasource::file_format::parquet::ParquetFormat;
 use datafusion::datasource::listing::{ListingOptions, PartitionedFile};
 use datafusion::datasource::physical_plan::ParquetExec;
 use datafusion::execution::context::SessionContext;
-use datafusion::physical_plan::metrics::MetricValue;
+use datafusion::execution::metrics::MetricValue;
+use datafusion::execution::TaskContext;
 use datafusion::physical_plan::{
     execute_stream, visit_execution_plan, ExecutionPlan, ExecutionPlanVisitor,
 };
@@ -52,19 +53,21 @@ async fn main() {
     let df = ctx.sql("SELECT * FROM my_table").await.unwrap();
     let plan = df.create_physical_plan().await.unwrap();
 
+    // Make sure you execute the plan to collect actual execution statistics.
+    // For example, in this example the `file_scan_config` is known without executing
+    // but the `bytes_scanned` would be None if we did not execute.
+    let task_ctx = ctx.task_ctx();
+    let mut batch_stream = execute_stream(plan.clone(), Arc::clone(&task_ctx)).unwrap();
+    while let Some(batch) = batch_stream.next().await {
+        println!("Batch rows: {}", batch.unwrap().num_rows());
+    }
+
     // Create empty visitor
     let mut visitor = ParquetExecVisitor {
         file_groups: None,
         bytes_scanned: None,
+        ctx: task_ctx,
     };
-
-    // Make sure you execute the plan to collect actual execution statistics.
-    // For example, in this example the `file_scan_config` is known without executing
-    // but the `bytes_scanned` would be None if we did not execute.
-    let mut batch_stream = execute_stream(plan.clone(), ctx.task_ctx()).unwrap();
-    while let Some(batch) = batch_stream.next().await {
-        println!("Batch rows: {}", batch.unwrap().num_rows());
-    }
 
     visit_execution_plan(plan.as_ref(), &mut visitor).unwrap();
 
@@ -85,6 +88,7 @@ async fn main() {
 struct ParquetExecVisitor {
     file_groups: Option<Vec<Vec<PartitionedFile>>>,
     bytes_scanned: Option<MetricValue>,
+    ctx: Arc<TaskContext>,
 }
 
 impl ExecutionPlanVisitor for ParquetExecVisitor {
@@ -99,7 +103,7 @@ impl ExecutionPlanVisitor for ParquetExecVisitor {
         if let Some(parquet_exec) = maybe_parquet_exec {
             self.file_groups = Some(parquet_exec.base_config().file_groups.clone());
 
-            let metrics = match parquet_exec.metrics() {
+            let metrics = match self.ctx.plan_metrics(plan.as_any()) {
                 None => return Ok(true),
                 Some(metrics) => metrics,
             };

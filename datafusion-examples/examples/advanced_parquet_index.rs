@@ -28,6 +28,7 @@ use datafusion::datasource::physical_plan::{
     parquet::ParquetFileReaderFactory, FileMeta, FileScanConfig,
 };
 use datafusion::datasource::TableProvider;
+use datafusion::execution::metrics::ExecutionPlanMetricsSet;
 use datafusion::execution::object_store::ObjectStoreUrl;
 use datafusion::parquet::arrow::arrow_reader::{
     ArrowReaderOptions, ParquetRecordBatchReaderBuilder, RowSelection, RowSelector,
@@ -39,7 +40,6 @@ use datafusion::parquet::file::properties::{EnabledStatistics, WriterProperties}
 use datafusion::parquet::schema::types::ColumnPath;
 use datafusion::physical_expr::PhysicalExpr;
 use datafusion::physical_optimizer::pruning::PruningPredicate;
-use datafusion::physical_plan::metrics::ExecutionPlanMetricsSet;
 use datafusion::physical_plan::ExecutionPlan;
 use datafusion::prelude::*;
 use datafusion_common::{
