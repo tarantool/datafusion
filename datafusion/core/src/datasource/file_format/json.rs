@@ -45,9 +45,9 @@ use arrow_array::RecordBatch;
 use datafusion_common::config::{ConfigField, ConfigFileType, JsonOptions};
 use datafusion_common::file_options::json_writer::JsonWriterOptions;
 use datafusion_common::{not_impl_err, GetExt, DEFAULT_JSON_EXTENSION};
+use datafusion_execution::metrics::MetricsSet;
 use datafusion_execution::TaskContext;
 use datafusion_physical_expr::PhysicalExpr;
-use datafusion_physical_plan::metrics::MetricsSet;
 use datafusion_physical_plan::ExecutionPlan;
 
 use async_trait::async_trait;

@@ -36,14 +36,14 @@ pub use builder::MetricBuilder;
 pub use value::{Count, Gauge, MetricValue, ScopedTimerGuard, Time, Timestamp};
 
 /// Something that tracks a value of interest (metric) of a DataFusion
-/// [`ExecutionPlan`] execution.
+/// execution plan.
 ///
 /// Typically [`Metric`]s are not created directly, but instead
 /// are created using [`MetricBuilder`] or methods on
 /// [`ExecutionPlanMetricsSet`].
 ///
 /// ```
-///  use datafusion_physical_plan::metrics::*;
+///  use datafusion_execution::metrics::*;
 ///
 ///  let metrics = ExecutionPlanMetricsSet::new();
 ///  assert!(metrics.clone_inner().output_rows().is_none());
@@ -63,7 +63,6 @@ pub use value::{Count, Gauge, MetricValue, ScopedTimerGuard, Time, Timestamp};
 ///  assert_eq!(metrics.clone_inner().output_rows(), Some(13));
 /// ```
 ///
-/// [`ExecutionPlan`]: super::ExecutionPlan
 
 #[derive(Debug)]
 pub struct Metric {
@@ -164,9 +163,8 @@ impl Metric {
     }
 }
 
-/// A snapshot of the metrics for a particular ([`ExecutionPlan`]).
+/// A snapshot of the metrics for a particular execution plan.
 ///
-/// [`ExecutionPlan`]: super::ExecutionPlan
 #[derive(Default, Debug, Clone)]
 pub struct MetricsSet {
     metrics: Vec<Arc<Metric>>,
@@ -336,17 +334,11 @@ impl Display for MetricsSet {
     }
 }
 
-/// A set of [`Metric`]s for an individual "operator" (e.g. `&dyn
-/// ExecutionPlan`).
-///
-/// This structure is intended as a convenience for [`ExecutionPlan`]
-/// implementations so they can generate different streams for multiple
-/// partitions but easily report them together.
+/// A set of [`Metric`]s for an individual "operator" (execution plan).
 ///
 /// Each `clone()` of this structure will add metrics to the same
 /// underlying metrics set
 ///
-/// [`ExecutionPlan`]: super::ExecutionPlan
 #[derive(Default, Debug, Clone)]
 pub struct ExecutionPlanMetricsSet {
     inner: Arc<Mutex<MetricsSet>>,
@@ -357,6 +349,13 @@ impl ExecutionPlanMetricsSet {
     pub fn new() -> Self {
         Self {
             inner: Arc::new(Mutex::new(MetricsSet::new())),
+        }
+    }
+
+    /// Create a new shared metrics set with specified metrics.
+    pub fn with_inner(metrics_set: MetricsSet) -> Self {
+        Self {
+            inner: Arc::new(Mutex::new(metrics_set)),
         }
     }
 

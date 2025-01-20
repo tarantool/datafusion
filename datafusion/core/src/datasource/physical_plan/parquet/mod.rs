@@ -33,13 +33,13 @@ use crate::{
     execution::context::TaskContext,
     physical_optimizer::pruning::PruningPredicate,
     physical_plan::{
-        metrics::{ExecutionPlanMetricsSet, MetricBuilder, MetricsSet},
         DisplayFormatType, ExecutionMode, ExecutionPlan, Partitioning, PlanProperties,
         SendableRecordBatchStream, Statistics,
     },
 };
 
 use arrow::datatypes::SchemaRef;
+use datafusion_execution::metrics::{ExecutionPlanMetricsSet, MetricBuilder};
 use datafusion_physical_expr::{EquivalenceProperties, LexOrdering, PhysicalExpr};
 
 use itertools::Itertools;
@@ -236,8 +236,6 @@ pub struct ParquetExec {
     /// Base configuration for this scan
     base_config: FileScanConfig,
     projected_statistics: Statistics,
-    /// Execution metrics
-    metrics: ExecutionPlanMetricsSet,
     /// Optional predicate for row filtering during parquet scan
     predicate: Option<Arc<dyn PhysicalExpr>>,
     /// Optional predicate for pruning row groups (derived from `predicate`)
@@ -250,6 +248,9 @@ pub struct ParquetExec {
     parquet_file_reader_factory: Option<Arc<dyn ParquetFileReaderFactory>>,
     /// Cached plan properties such as equivalence properties, ordering, partitioning, etc.
     cache: PlanProperties,
+    /// Planning metrics.
+    /// All execution metrics inherit these base metrics.
+    base_metrics: ExecutionPlanMetricsSet,
     /// Options for reading Parquet files
     table_parquet_options: TableParquetOptions,
     /// Optional user defined schema adapter
@@ -377,10 +378,9 @@ impl ParquetExecBuilder {
         debug!("Creating ParquetExec, files: {:?}, projection {:?}, predicate: {:?}, limit: {:?}",
         base_config.file_groups, base_config.projection, predicate, base_config.limit);
 
-        let metrics = ExecutionPlanMetricsSet::new();
-        let predicate_creation_errors =
-            MetricBuilder::new(&metrics).global_counter("num_predicate_creation_errors");
-
+        let base_metrics = ExecutionPlanMetricsSet::new();
+        let predicate_creation_errors = MetricBuilder::new(&base_metrics)
+            .global_counter("num_predicate_creation_errors");
         let file_schema = &base_config.file_schema;
         let pruning_predicate = predicate
             .clone()
@@ -413,13 +413,13 @@ impl ParquetExecBuilder {
         ParquetExec {
             base_config,
             projected_statistics,
-            metrics,
             predicate,
             pruning_predicate,
             page_pruning_predicate,
             metadata_size_hint,
             parquet_file_reader_factory,
             cache,
+            base_metrics,
             table_parquet_options,
             schema_adapter_factory,
         }
@@ -709,6 +709,11 @@ impl ExecutionPlan for ParquetExec {
             .clone()
             .unwrap_or_else(|| Arc::new(DefaultSchemaAdapterFactory::default()));
 
+        println!("parquet exec registered metrics...");
+        let metrics = ctx.get_or_register_metric_set_with_default(self, || {
+            ExecutionPlanMetricsSet::with_inner(self.base_metrics.clone_inner())
+        });
+
         let opener = ParquetOpener {
             partition_index,
             projection: Arc::from(projection),
@@ -719,7 +724,7 @@ impl ExecutionPlan for ParquetExec {
             page_pruning_predicate: self.page_pruning_predicate.clone(),
             table_schema: self.base_config.file_schema.clone(),
             metadata_size_hint: self.metadata_size_hint,
-            metrics: self.metrics.clone(),
+            metrics: metrics.clone(),
             parquet_file_reader_factory,
             pushdown_filters: self.pushdown_filters(),
             reorder_filters: self.reorder_filters(),
@@ -728,14 +733,12 @@ impl ExecutionPlan for ParquetExec {
             schema_adapter_factory,
         };
 
-        let stream =
-            FileStream::new(&self.base_config, partition_index, opener, &self.metrics)?;
-
-        Ok(Box::pin(stream))
-    }
-
-    fn metrics(&self) -> Option<MetricsSet> {
-        Some(self.metrics.clone_inner())
+        Ok(Box::pin(FileStream::new(
+            &self.base_config,
+            partition_index,
+            opener,
+            &metrics,
+        )?))
     }
 
     fn statistics(&self) -> Result<Statistics> {
@@ -752,13 +755,13 @@ impl ExecutionPlan for ParquetExec {
         Some(Arc::new(Self {
             base_config: new_config,
             projected_statistics: self.projected_statistics.clone(),
-            metrics: self.metrics.clone(),
             predicate: self.predicate.clone(),
             pruning_predicate: self.pruning_predicate.clone(),
             page_pruning_predicate: self.page_pruning_predicate.clone(),
             metadata_size_hint: self.metadata_size_hint,
             parquet_file_reader_factory: self.parquet_file_reader_factory.clone(),
             cache: self.cache.clone(),
+            base_metrics: self.base_metrics.clone(),
             table_parquet_options: self.table_parquet_options.clone(),
             schema_adapter_factory: self.schema_adapter_factory.clone(),
         }))
@@ -808,6 +811,7 @@ mod tests {
     use arrow::record_batch::RecordBatch;
     use arrow_schema::{DataType, Fields};
     use datafusion_common::{assert_contains, ScalarValue};
+    use datafusion_execution::metrics::MetricsSet;
     use datafusion_expr::{col, lit, when, Expr};
     use datafusion_physical_expr::planner::logical2physical;
     use datafusion_physical_plan::ExecutionPlanProperties;
@@ -827,6 +831,8 @@ mod tests {
         batches: Result<Vec<RecordBatch>>,
         /// The physical plan that was created (that has statistics, etc)
         parquet_exec: Arc<ParquetExec>,
+        /// Task context.
+        task_ctx: Arc<TaskContext>,
     }
 
     /// round-trip record batches by writing each individual RecordBatch to
@@ -933,8 +939,9 @@ mod tests {
             let task_ctx = session_ctx.task_ctx();
             let parquet_exec = Arc::new(parquet_exec);
             RoundTripResult {
-                batches: collect(parquet_exec.clone(), task_ctx).await,
+                batches: collect(parquet_exec.clone(), Arc::clone(&task_ctx)).await,
                 parquet_exec,
+                task_ctx,
             }
         }
     }
@@ -1167,7 +1174,7 @@ mod tests {
             "+----+----+----+",
         ];
         assert_batches_sorted_eq!(expected, &rt.batches.unwrap());
-        let metrics = rt.parquet_exec.metrics().unwrap();
+        let metrics = rt.task_ctx.plan_metrics(rt.parquet_exec.as_any()).unwrap();
         // Note there are were 6 rows in total (across three batches)
         assert_eq!(get_value(&metrics, "pushdown_rows_filtered"), 4);
     }
@@ -1319,7 +1326,7 @@ mod tests {
             "+----+----+",
         ];
         assert_batches_sorted_eq!(expected, &rt.batches.unwrap());
-        let metrics = rt.parquet_exec.metrics().unwrap();
+        let metrics = rt.task_ctx.plan_metrics(rt.parquet_exec.as_any()).unwrap();
         // Note there are were 6 rows in total (across three batches)
         assert_eq!(get_value(&metrics, "pushdown_rows_filtered"), 5);
     }
@@ -1390,8 +1397,7 @@ mod tests {
             "+------+----+",
         ];
         assert_batches_sorted_eq!(expected, &rt.batches.unwrap());
-        let metrics = rt.parquet_exec.metrics().unwrap();
-
+        let metrics = rt.task_ctx.plan_metrics(rt.parquet_exec.as_any()).unwrap();
         // There are 4 rows pruned in each of batch2, batch3, and
         // batch4 for a total of 12. batch1 had no pruning as c2 was
         // filled in as null
@@ -1769,7 +1775,7 @@ mod tests {
             .round_trip(vec![batch1])
             .await;
 
-        let metrics = rt.parquet_exec.metrics().unwrap();
+        let metrics = rt.task_ctx.plan_metrics(rt.parquet_exec.as_any()).unwrap();
 
         // assert the batches and some metrics
         #[rustfmt::skip]
@@ -1821,8 +1827,7 @@ mod tests {
             .round_trip(vec![batch1])
             .await;
 
-        let metrics = rt.parquet_exec.metrics().unwrap();
-
+        let metrics = rt.task_ctx.plan_metrics(rt.parquet_exec.as_any()).unwrap();
         // assert the batches and some metrics
         let expected = [
             "+-----+", "| c1  |", "+-----+", "| Foo |", "| zzz |", "+-----+",

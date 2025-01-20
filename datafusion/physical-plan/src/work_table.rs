@@ -20,10 +20,7 @@
 use std::any::Any;
 use std::sync::{Arc, Mutex};
 
-use super::{
-    metrics::{ExecutionPlanMetricsSet, MetricsSet},
-    SendableRecordBatchStream, Statistics,
-};
+use super::{SendableRecordBatchStream, Statistics};
 use crate::memory::MemoryStream;
 use crate::{DisplayAs, DisplayFormatType, ExecutionMode, ExecutionPlan, PlanProperties};
 
@@ -101,8 +98,6 @@ pub struct WorkTableExec {
     schema: SchemaRef,
     /// The work table
     work_table: Arc<WorkTable>,
-    /// Execution metrics
-    metrics: ExecutionPlanMetricsSet,
     /// Cache holding plan properties like equivalences, output partitioning etc.
     cache: PlanProperties,
 }
@@ -114,7 +109,6 @@ impl WorkTableExec {
         Self {
             name,
             schema,
-            metrics: ExecutionPlanMetricsSet::new(),
             work_table: Arc::new(WorkTable::new()),
             cache,
         }
@@ -124,7 +118,6 @@ impl WorkTableExec {
         Self {
             name: self.name.clone(),
             schema: Arc::clone(&self.schema),
-            metrics: ExecutionPlanMetricsSet::new(),
             work_table,
             cache: self.cache.clone(),
         }
@@ -205,10 +198,6 @@ impl ExecutionPlan for WorkTableExec {
             MemoryStream::try_new(batch.batches, Arc::clone(&self.schema), None)?
                 .with_reservation(batch.reservation),
         ))
-    }
-
-    fn metrics(&self) -> Option<MetricsSet> {
-        Some(self.metrics.clone_inner())
     }
 
     fn statistics(&self) -> Result<Statistics> {

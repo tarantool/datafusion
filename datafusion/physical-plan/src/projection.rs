@@ -27,7 +27,6 @@ use std::sync::Arc;
 use std::task::{Context, Poll};
 
 use super::expressions::Column;
-use super::metrics::{BaselineMetrics, ExecutionPlanMetricsSet, MetricsSet};
 use super::{
     DisplayAs, ExecutionPlanProperties, PlanProperties, RecordBatchStream,
     SendableRecordBatchStream, Statistics,
@@ -38,6 +37,7 @@ use arrow::datatypes::{Field, Schema, SchemaRef};
 use arrow::record_batch::{RecordBatch, RecordBatchOptions};
 use datafusion_common::stats::Precision;
 use datafusion_common::Result;
+use datafusion_execution::metrics::BaselineMetrics;
 use datafusion_execution::TaskContext;
 use datafusion_physical_expr::equivalence::ProjectionMapping;
 use datafusion_physical_expr::expressions::{resolve_placeholders, Literal};
@@ -54,8 +54,6 @@ pub struct ProjectionExec {
     schema: SchemaRef,
     /// The input plan
     input: Arc<dyn ExecutionPlan>,
-    /// Execution metrics
-    metrics: ExecutionPlanMetricsSet,
     /// Cache holding plan properties like equivalences, output partitioning etc.
     cache: PlanProperties,
 }
@@ -97,7 +95,6 @@ impl ProjectionExec {
             expr,
             schema,
             input,
-            metrics: ExecutionPlanMetricsSet::new(),
             cache,
         })
     }
@@ -210,6 +207,8 @@ impl ExecutionPlan for ProjectionExec {
         context: Arc<TaskContext>,
     ) -> Result<SendableRecordBatchStream> {
         trace!("Start ProjectionExec::execute for partition {} of context session_id {} and task_id {:?}", partition, context.session_id(), context.task_id());
+        let metrics = context.get_or_register_metric_set(self);
+
         Ok(Box::pin(ProjectionStream {
             schema: Arc::clone(&self.schema),
             expr: self
@@ -221,13 +220,9 @@ impl ExecutionPlan for ProjectionExec {
                     Ok(resolved)
                 })
                 .collect::<Result<_>>()?,
-            input: self.input.execute(partition, context)?,
-            baseline_metrics: BaselineMetrics::new(&self.metrics, partition),
+            input: self.input.execute(partition, Arc::clone(&context))?,
+            baseline_metrics: BaselineMetrics::new(&metrics, partition),
         }))
-    }
-
-    fn metrics(&self) -> Option<MetricsSet> {
-        Some(self.metrics.clone_inner())
     }
 
     fn statistics(&self) -> Result<Statistics> {

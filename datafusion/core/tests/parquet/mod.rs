@@ -33,9 +33,9 @@ use arrow::{
 use chrono::{Datelike, Duration, TimeDelta};
 use datafusion::{
     datasource::{provider_as_source, TableProvider},
-    physical_plan::metrics::MetricsSet,
     prelude::{ParquetReadOptions, SessionConfig, SessionContext},
 };
+use datafusion_execution::metrics::MetricsSet;
 use datafusion_expr::{Expr, LogicalPlan, LogicalPlanBuilder};
 use parquet::arrow::ArrowWriter;
 use parquet::file::properties::{EnabledStatistics, WriterProperties};
@@ -278,13 +278,16 @@ impl ContextWithParquet {
             .expect("creating physical plan");
 
         let task_ctx = state.task_ctx();
-        let results = datafusion::physical_plan::collect(physical_plan.clone(), task_ctx)
-            .await
-            .expect("Running");
+        let results = datafusion::physical_plan::collect(
+            physical_plan.clone(),
+            Arc::clone(&task_ctx),
+        )
+        .await
+        .expect("Running");
 
         // find the parquet metrics
         let parquet_metrics =
-            MetricsFinder::find_metrics(physical_plan.as_ref()).unwrap();
+            MetricsFinder::find_metrics(physical_plan.as_ref(), task_ctx).unwrap();
 
         let result_rows = results.iter().map(|b| b.num_rows()).sum();
 

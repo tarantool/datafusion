@@ -26,9 +26,9 @@ use datafusion::datasource::physical_plan::parquet::{ParquetAccessPlan, RowGroup
 use datafusion::datasource::physical_plan::{FileScanConfig, ParquetExec};
 use datafusion::prelude::SessionContext;
 use datafusion_common::{assert_contains, DFSchema};
+use datafusion_execution::metrics::MetricsSet;
 use datafusion_execution::object_store::ObjectStoreUrl;
 use datafusion_expr::{col, lit, Expr};
-use datafusion_physical_plan::metrics::MetricsSet;
 use datafusion_physical_plan::ExecutionPlan;
 use parquet::arrow::arrow_reader::{RowSelection, RowSelector};
 use parquet::arrow::ArrowWriter;
@@ -342,9 +342,11 @@ impl TestFull {
 
         let plan: Arc<dyn ExecutionPlan> = builder.build_arc();
 
+        let task_ctx = ctx.task_ctx();
         // run the ParquetExec and collect the results
         let results =
-            datafusion::physical_plan::collect(Arc::clone(&plan), ctx.task_ctx()).await?;
+            datafusion::physical_plan::collect(Arc::clone(&plan), Arc::clone(&task_ctx))
+                .await?;
 
         // calculate the total number of rows that came out
         let total_rows = results.iter().map(|b| b.num_rows()).sum::<usize>();
@@ -355,7 +357,7 @@ impl TestFull {
             pretty_format_batches(&results).unwrap()
         );
 
-        Ok(MetricsFinder::find_metrics(plan.as_ref()).unwrap())
+        Ok(MetricsFinder::find_metrics(plan.as_ref(), task_ctx).unwrap())
     }
 }
 

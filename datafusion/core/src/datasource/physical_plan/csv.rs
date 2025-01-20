@@ -30,7 +30,6 @@ use crate::datasource::physical_plan::file_stream::{
 };
 use crate::datasource::physical_plan::FileMeta;
 use crate::error::{DataFusionError, Result};
-use crate::physical_plan::metrics::{ExecutionPlanMetricsSet, MetricsSet};
 use crate::physical_plan::{
     DisplayAs, DisplayFormatType, ExecutionMode, ExecutionPlan, ExecutionPlanProperties,
     Partitioning, PlanProperties, SendableRecordBatchStream, Statistics,
@@ -81,8 +80,6 @@ pub struct CsvExec {
     escape: Option<u8>,
     comment: Option<u8>,
     newlines_in_values: bool,
-    /// Execution metrics
-    metrics: ExecutionPlanMetricsSet,
     /// Compression type of the file associated with CsvExec
     pub file_compression_type: FileCompressionType,
     cache: PlanProperties,
@@ -225,7 +222,6 @@ impl CsvExecBuilder {
             terminator,
             escape,
             newlines_in_values,
-            metrics: ExecutionPlanMetricsSet::new(),
             file_compression_type,
             cache,
             comment,
@@ -434,17 +430,18 @@ impl ExecutionPlan for CsvExec {
             config,
             file_compression_type: self.file_compression_type.to_owned(),
         };
-        let stream =
-            FileStream::new(&self.base_config, partition, opener, &self.metrics)?;
-        Ok(Box::pin(stream) as SendableRecordBatchStream)
+        let metrics = context.get_or_register_metric_set(self);
+
+        Ok(Box::pin(FileStream::new(
+            &self.base_config,
+            partition,
+            opener,
+            &metrics,
+        )?) as SendableRecordBatchStream)
     }
 
     fn statistics(&self) -> Result<Statistics> {
         Ok(self.projected_statistics.clone())
-    }
-
-    fn metrics(&self) -> Option<MetricsSet> {
-        Some(self.metrics.clone_inner())
     }
 
     fn fetch(&self) -> Option<usize> {
@@ -464,7 +461,6 @@ impl ExecutionPlan for CsvExec {
             terminator: self.terminator,
             comment: self.comment,
             newlines_in_values: self.newlines_in_values,
-            metrics: self.metrics.clone(),
             file_compression_type: self.file_compression_type,
             cache: self.cache.clone(),
         }))
@@ -756,6 +752,7 @@ mod tests {
     use datafusion_common::test_util::arrow_test_data;
 
     use datafusion_common::config::CsvOptions;
+    use datafusion_execution::metrics::MetricsSet;
     use datafusion_execution::object_store::ObjectStoreUrl;
     use object_store::chunked::ChunkedStore;
     use object_store::local::LocalFileSystem;
@@ -1083,7 +1080,8 @@ mod tests {
         assert_eq!(13, csv.base_config.file_schema.fields().len());
         assert_eq!(2, csv.schema().fields().len());
 
-        let mut it = csv.execute(0, task_ctx)?;
+        let csv = Arc::new(csv);
+        let mut it = csv.execute(0, Arc::clone(&task_ctx))?;
         let batch = it.next().await.unwrap()?;
         assert_eq!(2, batch.num_columns());
         assert_eq!(100, batch.num_rows());
@@ -1102,7 +1100,9 @@ mod tests {
         ];
         crate::assert_batches_eq!(expected, &[batch.slice(0, 5)]);
 
-        let metrics = csv.metrics().expect("doesn't found metrics");
+        let metrics = task_ctx
+            .plan_metrics(csv.as_ref())
+            .expect("doesn't found metrics");
         let time_elapsed_processing = get_value(&metrics, "time_elapsed_processing");
         assert!(
             time_elapsed_processing > 0,

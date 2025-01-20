@@ -16,11 +16,12 @@
 // under the License.
 
 use super::*;
+use datafusion_execution::metrics::{MetricValue, Timestamp};
+use datafusion_execution::TaskContext;
 use rstest::rstest;
 
 use datafusion::config::ConfigOptions;
 use datafusion::physical_plan::display::DisplayableExecutionPlan;
-use datafusion::physical_plan::metrics::Timestamp;
 
 #[tokio::test]
 async fn explain_analyze_baseline_metrics() {
@@ -48,7 +49,9 @@ async fn explain_analyze_baseline_metrics() {
     let dataframe = ctx.sql(sql).await.unwrap();
     let physical_plan = dataframe.create_physical_plan().await.unwrap();
     let task_ctx = ctx.task_ctx();
-    let results = collect(physical_plan.clone(), task_ctx).await.unwrap();
+    let results = collect(physical_plan.clone(), Arc::clone(&task_ctx))
+        .await
+        .unwrap();
     let formatted = arrow::util::pretty::pretty_format_batches(&results)
         .unwrap()
         .to_string();
@@ -114,7 +117,9 @@ async fn explain_analyze_baseline_metrics() {
 
     // Validate that the recorded elapsed compute time was more than
     // zero for all operators as well as the start/end timestamp are set
-    struct TimeValidator {}
+    struct TimeValidator {
+        ctx: Arc<TaskContext>,
+    }
     impl ExecutionPlanVisitor for TimeValidator {
         type Error = std::convert::Infallible;
 
@@ -122,17 +127,23 @@ async fn explain_analyze_baseline_metrics() {
             if !expected_to_have_metrics(plan) {
                 return Ok(true);
             }
-            let metrics = plan.metrics().unwrap().aggregate_by_name();
+            let metrics = self
+                .ctx
+                .plan_metrics(plan.as_any())
+                .unwrap()
+                .aggregate_by_name();
 
             assert!(
                 metrics.output_rows().unwrap() > 0,
                 "plan: {}",
-                DisplayableExecutionPlan::with_metrics(plan).one_line()
+                DisplayableExecutionPlan::with_metrics(plan, Arc::clone(&self.ctx))
+                    .one_line()
             );
             assert!(
                 metrics.elapsed_compute().unwrap() > 0,
                 "plan: {}",
-                DisplayableExecutionPlan::with_metrics(plan).one_line()
+                DisplayableExecutionPlan::with_metrics(plan, Arc::clone(&self.ctx))
+                    .one_line()
             );
 
             let mut saw_start = false;
@@ -156,8 +167,11 @@ async fn explain_analyze_baseline_metrics() {
         }
     }
 
-    datafusion::physical_plan::accept(physical_plan.as_ref(), &mut TimeValidator {})
-        .unwrap();
+    datafusion::physical_plan::accept(
+        physical_plan.as_ref(),
+        &mut TimeValidator { ctx: task_ctx },
+    )
+    .unwrap();
 }
 fn nanos_from_timestamp(ts: &Timestamp) -> i64 {
     ts.value().unwrap().timestamp_nanos_opt().unwrap()

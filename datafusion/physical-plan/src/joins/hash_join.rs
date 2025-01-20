@@ -42,7 +42,6 @@ use crate::{
         BuildProbeJoinMetrics, ColumnIndex, JoinFilter, JoinHashMap, JoinHashMapOffset,
         JoinHashMapType, JoinOn, JoinOnRef, StatefulStreamResult,
     },
-    metrics::{ExecutionPlanMetricsSet, MetricsSet},
     DisplayAs, DisplayFormatType, Distribution, ExecutionMode, ExecutionPlan,
     Partitioning, PlanProperties, RecordBatchStream, SendableRecordBatchStream,
     Statistics,
@@ -313,8 +312,6 @@ pub struct HashJoinExec {
     random_state: RandomState,
     /// Partitioning mode to use
     pub mode: PartitionMode,
-    /// Execution metrics
-    metrics: ExecutionPlanMetricsSet,
     /// The projection indices of the columns in the output schema of join
     pub projection: Option<Vec<usize>>,
     /// Information of index and left / right placement of columns
@@ -382,7 +379,6 @@ impl HashJoinExec {
             left_fut: Default::default(),
             random_state,
             mode: partition_mode,
-            metrics: ExecutionPlanMetricsSet::new(),
             projection,
             column_indices,
             null_equals_null,
@@ -690,7 +686,8 @@ impl ExecutionPlan for HashJoinExec {
             );
         }
 
-        let join_metrics = BuildProbeJoinMetrics::new(partition, &self.metrics);
+        let metrics = context.get_or_register_metric_set(self);
+        let join_metrics = BuildProbeJoinMetrics::new(partition, &metrics);
         let left_fut = match self.mode {
             PartitionMode::CollectLeft => self.left_fut.once(|| {
                 let reservation =
@@ -743,7 +740,7 @@ impl ExecutionPlan for HashJoinExec {
 
         // we have the batches and the hash map with their keys. We can how create a stream
         // over the right that uses this information to issue new batches.
-        let right_stream = self.right.execute(partition, context)?;
+        let right_stream = self.right.execute(partition, Arc::clone(&context))?;
 
         // update column indices to reflect the projection
         let column_indices_after_projection = match &self.projection {
@@ -771,10 +768,6 @@ impl ExecutionPlan for HashJoinExec {
             hashes_buffer: vec![],
             right_side_ordered: self.right.output_ordering().is_some(),
         }))
-    }
-
-    fn metrics(&self) -> Option<MetricsSet> {
-        Some(self.metrics.clone_inner())
     }
 
     fn statistics(&self) -> Result<Statistics> {

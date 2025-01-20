@@ -26,13 +26,15 @@
 //! select * from data limit 10;
 //! ```
 
+use std::sync::Arc;
+
 use arrow::compute::concat_batches;
 use arrow::record_batch::RecordBatch;
 use datafusion::physical_plan::collect;
-use datafusion::physical_plan::metrics::MetricsSet;
 use datafusion::prelude::{col, lit, lit_timestamp_nano, Expr, SessionContext};
 use datafusion::test_util::parquet::{ParquetScanOptions, TestParquetFile};
 use datafusion_common::instant::Instant;
+use datafusion_execution::metrics::MetricsSet;
 use datafusion_expr::utils::{conjunction, disjunction, split_conjunction};
 
 use itertools::Itertools;
@@ -511,7 +513,8 @@ impl<'a> TestCase<'a> {
             .create_scan(&ctx, Some(filter.clone()))
             .await
             .unwrap();
-        let result = collect(exec.clone(), ctx.task_ctx()).await.unwrap();
+        let task_ctx = ctx.task_ctx();
+        let result = collect(exec.clone(), Arc::clone(&task_ctx)).await.unwrap();
 
         // Concatenate the results back together
         let batch = concat_batches(&self.test_parquet_file.schema(), &result).unwrap();
@@ -528,8 +531,8 @@ impl<'a> TestCase<'a> {
         assert_eq!(total_rows, self.expected_rows);
 
         // verify expected pushdown
-        let metrics =
-            TestParquetFile::parquet_metrics(&exec).expect("found parquet metrics");
+        let metrics = TestParquetFile::parquet_metrics(&exec, &task_ctx)
+            .expect("found parquet metrics");
 
         let pushdown_expected = if scan_options.pushdown_filters {
             self.pushdown_expected

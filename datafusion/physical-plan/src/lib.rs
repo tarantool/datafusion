@@ -41,7 +41,6 @@ pub use crate::execution_plan::{
     execute_stream_partitioned, get_plan_string, with_new_children_if_necessary,
     ExecutionMode, ExecutionPlan, ExecutionPlanProperties, PlanProperties,
 };
-pub use crate::metrics::Metric;
 pub use crate::ordering::InputOrderMode;
 pub use crate::stream::EmptyRecordBatchStream;
 pub use crate::topk::TopK;
@@ -65,7 +64,6 @@ pub mod insert;
 pub mod joins;
 pub mod limit;
 pub mod memory;
-pub mod metrics;
 pub mod placeholder_row;
 pub mod projection;
 pub mod recursive_query;

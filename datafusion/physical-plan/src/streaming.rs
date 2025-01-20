@@ -28,11 +28,11 @@ use crate::{ExecutionPlan, Partitioning, SendableRecordBatchStream};
 use arrow::datatypes::SchemaRef;
 use arrow_schema::Schema;
 use datafusion_common::{internal_err, plan_err, Result};
+use datafusion_execution::metrics::BaselineMetrics;
 use datafusion_execution::TaskContext;
 use datafusion_physical_expr::{EquivalenceProperties, LexOrdering};
 
 use crate::limit::LimitStream;
-use crate::metrics::{BaselineMetrics, ExecutionPlanMetricsSet, MetricsSet};
 use async_trait::async_trait;
 use futures::stream::StreamExt;
 use log::debug;
@@ -62,7 +62,6 @@ pub struct StreamingTableExec {
     infinite: bool,
     limit: Option<usize>,
     cache: PlanProperties,
-    metrics: ExecutionPlanMetricsSet,
 }
 
 impl StreamingTableExec {
@@ -106,7 +105,6 @@ impl StreamingTableExec {
             infinite,
             limit,
             cache,
-            metrics: ExecutionPlanMetricsSet::new(),
         })
     }
 
@@ -241,7 +239,7 @@ impl ExecutionPlan for StreamingTableExec {
         partition: usize,
         ctx: Arc<TaskContext>,
     ) -> Result<SendableRecordBatchStream> {
-        let stream = self.partitions[partition].execute(ctx);
+        let stream = self.partitions[partition].execute(Arc::clone(&ctx));
         let projected_stream = match self.projection.clone() {
             Some(projection) => Box::pin(RecordBatchStreamAdapter::new(
                 Arc::clone(&self.projected_schema),
@@ -251,10 +249,11 @@ impl ExecutionPlan for StreamingTableExec {
             )),
             None => stream,
         };
-        Ok(match self.limit {
+        let metrics = ctx.get_or_register_metric_set(self);
+        let stream = match self.limit {
             None => projected_stream,
             Some(fetch) => {
-                let baseline_metrics = BaselineMetrics::new(&self.metrics, partition);
+                let baseline_metrics = BaselineMetrics::new(&metrics, partition);
                 Box::pin(LimitStream::new(
                     projected_stream,
                     0,
@@ -262,11 +261,8 @@ impl ExecutionPlan for StreamingTableExec {
                     baseline_metrics,
                 ))
             }
-        })
-    }
-
-    fn metrics(&self) -> Option<MetricsSet> {
-        Some(self.metrics.clone_inner())
+        };
+        Ok(stream)
     }
 
     fn with_fetch(&self, limit: Option<usize>) -> Option<Arc<dyn ExecutionPlan>> {
@@ -278,7 +274,6 @@ impl ExecutionPlan for StreamingTableExec {
             infinite: self.infinite,
             limit,
             cache: self.cache.clone(),
-            metrics: self.metrics.clone(),
         }))
     }
 }

@@ -30,7 +30,6 @@ use crate::datasource::physical_plan::file_stream::{
 };
 use crate::datasource::physical_plan::FileMeta;
 use crate::error::{DataFusionError, Result};
-use crate::physical_plan::metrics::{ExecutionPlanMetricsSet, MetricsSet};
 use crate::physical_plan::{
     DisplayAs, DisplayFormatType, ExecutionMode, ExecutionPlan, ExecutionPlanProperties,
     Partitioning, PlanProperties, SendableRecordBatchStream, Statistics,
@@ -53,8 +52,6 @@ use tokio::task::JoinSet;
 pub struct NdJsonExec {
     base_config: FileScanConfig,
     projected_statistics: Statistics,
-    /// Execution metrics
-    metrics: ExecutionPlanMetricsSet,
     file_compression_type: FileCompressionType,
     cache: PlanProperties,
 }
@@ -75,7 +72,6 @@ impl NdJsonExec {
         Self {
             base_config,
             projected_statistics,
-            metrics: ExecutionPlanMetricsSet::new(),
             file_compression_type,
             cache,
         }
@@ -193,18 +189,18 @@ impl ExecutionPlan for NdJsonExec {
             object_store,
         };
 
-        let stream =
-            FileStream::new(&self.base_config, partition, opener, &self.metrics)?;
+        let metrics = context.get_or_register_metric_set(self);
 
-        Ok(Box::pin(stream) as SendableRecordBatchStream)
+        Ok(Box::pin(FileStream::new(
+            &self.base_config,
+            partition,
+            opener,
+            &metrics,
+        )?) as SendableRecordBatchStream)
     }
 
     fn statistics(&self) -> Result<Statistics> {
         Ok(self.projected_statistics.clone())
-    }
-
-    fn metrics(&self) -> Option<MetricsSet> {
-        Some(self.metrics.clone_inner())
     }
 
     fn fetch(&self) -> Option<usize> {
@@ -217,7 +213,6 @@ impl ExecutionPlan for NdJsonExec {
         Some(Arc::new(Self {
             base_config: new_config,
             projected_statistics: self.projected_statistics.clone(),
-            metrics: self.metrics.clone(),
             file_compression_type: self.file_compression_type,
             cache: self.cache.clone(),
         }))

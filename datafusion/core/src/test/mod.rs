@@ -61,6 +61,7 @@ use xz2::write::XzEncoder;
 #[cfg(feature = "compression")]
 use zstd::Encoder as ZstdEncoder;
 
+/// Create a testing dual table.
 pub fn create_table_dual() -> Arc<dyn TableProvider> {
     let dual_schema = Arc::new(Schema::new(vec![
         Field::new("id", DataType::Int32, false),
@@ -203,6 +204,7 @@ pub fn partitioned_csv_config(
         .with_file_groups(file_groups)
 }
 
+/// Assert that fields are equal.
 pub fn assert_fields_eq(plan: &LogicalPlan, expected: Vec<&str>) {
     let actual: Vec<String> = plan
         .schema()
@@ -368,6 +370,7 @@ pub struct StatisticsExec {
 }
 
 impl StatisticsExec {
+    /// Make a new [`StatisticsExec`].
     pub fn new(stats: Statistics, schema: Schema) -> Self {
         assert_eq!(
             stats.column_statistics.len(), schema.fields().len(),

@@ -26,7 +26,6 @@ use crate::datasource::physical_plan::{
     FileMeta, FileOpenFuture, FileOpener, FileScanConfig,
 };
 use crate::error::Result;
-use crate::physical_plan::metrics::{ExecutionPlanMetricsSet, MetricsSet};
 use crate::physical_plan::{
     DisplayAs, DisplayFormatType, ExecutionPlan, Partitioning, SendableRecordBatchStream,
 };
@@ -52,8 +51,6 @@ pub struct ArrowExec {
     projected_statistics: Statistics,
     projected_schema: SchemaRef,
     projected_output_ordering: Vec<LexOrdering>,
-    /// Execution metrics
-    metrics: ExecutionPlanMetricsSet,
     cache: PlanProperties,
 }
 
@@ -72,7 +69,6 @@ impl ArrowExec {
             projected_schema,
             projected_statistics,
             projected_output_ordering,
-            metrics: ExecutionPlanMetricsSet::new(),
             cache,
         }
     }
@@ -184,13 +180,13 @@ impl ExecutionPlan for ArrowExec {
             object_store,
             projection: self.base_config.file_column_projection_indices(),
         };
-        let stream =
-            FileStream::new(&self.base_config, partition, opener, &self.metrics)?;
-        Ok(Box::pin(stream))
-    }
-
-    fn metrics(&self) -> Option<MetricsSet> {
-        Some(self.metrics.clone_inner())
+        let metrics = context.get_or_register_metric_set(self);
+        Ok(Box::pin(FileStream::new(
+            &self.base_config,
+            partition,
+            opener,
+            &metrics,
+        )?))
     }
 
     fn statistics(&self) -> Result<Statistics> {
@@ -209,7 +205,6 @@ impl ExecutionPlan for ArrowExec {
             projected_statistics: self.projected_statistics.clone(),
             projected_schema: self.projected_schema.clone(),
             projected_output_ordering: self.projected_output_ordering.clone(),
-            metrics: self.metrics.clone(),
             cache: self.cache.clone(),
         }))
     }

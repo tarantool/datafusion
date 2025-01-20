@@ -33,11 +33,12 @@ use crate::logical_expr::simplify::SimplifyContext;
 use crate::optimizer::simplify_expressions::ExprSimplifier;
 use crate::physical_expr::create_physical_expr;
 use crate::physical_plan::filter::FilterExec;
-use crate::physical_plan::metrics::MetricsSet;
 use crate::physical_plan::ExecutionPlan;
 use crate::prelude::{Expr, SessionConfig, SessionContext};
 
 use crate::datasource::physical_plan::parquet::ParquetExecBuilder;
+use datafusion_execution::metrics::MetricsSet;
+use datafusion_execution::TaskContext;
 use object_store::path::Path;
 use object_store::ObjectMeta;
 use parquet::arrow::ArrowWriter;
@@ -184,13 +185,16 @@ impl TestParquetFile {
     ///
     /// Recursively searches for ParquetExec and returns the metrics
     /// on the first one it finds
-    pub fn parquet_metrics(plan: &Arc<dyn ExecutionPlan>) -> Option<MetricsSet> {
-        if let Some(parquet) = plan.as_any().downcast_ref::<ParquetExec>() {
-            return parquet.metrics();
+    pub fn parquet_metrics(
+        plan: &Arc<dyn ExecutionPlan>,
+        ctx: &Arc<TaskContext>,
+    ) -> Option<MetricsSet> {
+        if plan.as_any().downcast_ref::<ParquetExec>().is_some() {
+            return ctx.plan_metrics(plan.as_any());
         }
 
         for child in plan.children() {
-            if let Some(metrics) = Self::parquet_metrics(child) {
+            if let Some(metrics) = Self::parquet_metrics(child, ctx) {
                 return Some(metrics);
             }
         }

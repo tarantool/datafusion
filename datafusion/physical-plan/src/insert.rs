@@ -26,7 +26,7 @@ use super::{
     execute_input_stream, DisplayAs, DisplayFormatType, ExecutionPlan,
     ExecutionPlanProperties, Partitioning, PlanProperties, SendableRecordBatchStream,
 };
-use crate::metrics::MetricsSet;
+
 use crate::stream::RecordBatchStreamAdapter;
 
 use arrow::datatypes::SchemaRef;
@@ -34,7 +34,10 @@ use arrow::record_batch::RecordBatch;
 use arrow_array::{ArrayRef, UInt64Array};
 use arrow_schema::{DataType, Field, Schema};
 use datafusion_common::{internal_err, Result};
-use datafusion_execution::TaskContext;
+use datafusion_execution::{
+    metrics::{ExecutionPlanMetricsSet, MetricsSet},
+    TaskContext,
+};
 use datafusion_physical_expr::{Distribution, EquivalenceProperties};
 
 use async_trait::async_trait;
@@ -55,7 +58,7 @@ pub trait DataSink: DisplayAs + Debug + Send + Sync {
     /// Return a snapshot of the [MetricsSet] for this
     /// [DataSink].
     ///
-    /// See [ExecutionPlan::metrics()] for more details
+    /// See [TaskContext::plan_metrics()] for more details
     fn metrics(&self) -> Option<MetricsSet>;
 
     // TODO add desired input ordering
@@ -238,20 +241,21 @@ impl ExecutionPlan for DataSinkExec {
         let count_schema = Arc::clone(&self.count_schema);
         let sink = Arc::clone(&self.sink);
 
-        let stream = futures::stream::once(async move {
-            sink.write_all(data, &context).await.map(make_count_batch)
+        let stream = futures::stream::once({
+            let context = Arc::clone(&context);
+            async move { sink.write_all(data, &context).await.map(make_count_batch) }
         })
         .boxed();
 
-        Ok(Box::pin(RecordBatchStreamAdapter::new(
-            count_schema,
-            stream,
-        )))
-    }
+        let stream = RecordBatchStreamAdapter::new(count_schema, stream);
 
-    /// Returns the metrics of the underlying [DataSink]
-    fn metrics(&self) -> Option<MetricsSet> {
-        self.sink.metrics()
+        if let Some(metrics) = self.sink.metrics() {
+            context.get_or_register_metric_set_with_default(self, || {
+                ExecutionPlanMetricsSet::with_inner(metrics.clone())
+            });
+        }
+
+        Ok(Box::pin(stream))
     }
 }
 

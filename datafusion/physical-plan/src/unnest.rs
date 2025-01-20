@@ -20,7 +20,6 @@
 use std::collections::HashMap;
 use std::{any::Any, sync::Arc};
 
-use super::metrics::{self, ExecutionPlanMetricsSet, MetricBuilder, MetricsSet};
 use super::{DisplayAs, ExecutionPlanProperties, PlanProperties};
 use crate::{
     DisplayFormatType, Distribution, ExecutionPlan, RecordBatchStream,
@@ -41,6 +40,7 @@ use arrow_ord::cmp::lt;
 use datafusion_common::{
     exec_datafusion_err, exec_err, internal_err, Result, UnnestOptions,
 };
+use datafusion_execution::metrics::{self, ExecutionPlanMetricsSet, MetricBuilder};
 use datafusion_execution::TaskContext;
 use datafusion_expr::ColumnarValue;
 use datafusion_physical_expr::EquivalenceProperties;
@@ -68,8 +68,6 @@ pub struct UnnestExec {
     struct_column_indices: Vec<usize>,
     /// Options
     options: UnnestOptions,
-    /// Execution metrics
-    metrics: ExecutionPlanMetricsSet,
     /// Cache holding plan properties like equivalences, output partitioning etc.
     cache: PlanProperties,
 }
@@ -91,7 +89,6 @@ impl UnnestExec {
             list_column_indices,
             struct_column_indices,
             options,
-            metrics: Default::default(),
             cache,
         }
     }
@@ -183,8 +180,9 @@ impl ExecutionPlan for UnnestExec {
         partition: usize,
         context: Arc<TaskContext>,
     ) -> Result<SendableRecordBatchStream> {
-        let input = self.input.execute(partition, context)?;
-        let metrics = UnnestMetrics::new(partition, &self.metrics);
+        let input = self.input.execute(partition, Arc::clone(&context))?;
+        let metrics = context.get_or_register_metric_set(self);
+        let unnest_metrics = UnnestMetrics::new(partition, &metrics);
 
         Ok(Box::pin(UnnestStream {
             input,
@@ -192,12 +190,8 @@ impl ExecutionPlan for UnnestExec {
             list_type_columns: self.list_column_indices.clone(),
             struct_column_indices: self.struct_column_indices.iter().copied().collect(),
             options: self.options.clone(),
-            metrics,
+            metrics: unnest_metrics,
         }))
-    }
-
-    fn metrics(&self) -> Option<MetricsSet> {
-        Some(self.metrics.clone_inner())
     }
 }
 

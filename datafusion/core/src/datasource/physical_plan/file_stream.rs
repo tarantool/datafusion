@@ -30,9 +30,7 @@ use crate::datasource::listing::PartitionedFile;
 use crate::datasource::physical_plan::file_scan_config::PartitionColumnProjector;
 use crate::datasource::physical_plan::{FileMeta, FileScanConfig};
 use crate::error::Result;
-use crate::physical_plan::metrics::{
-    BaselineMetrics, Count, ExecutionPlanMetricsSet, MetricBuilder, Time,
-};
+
 use crate::physical_plan::RecordBatchStream;
 
 use arrow::datatypes::SchemaRef;
@@ -41,6 +39,9 @@ use arrow::record_batch::RecordBatch;
 use datafusion_common::instant::Instant;
 use datafusion_common::ScalarValue;
 
+use datafusion_execution::metrics::{
+    BaselineMetrics, Count, ExecutionPlanMetricsSet, MetricBuilder, Time,
+};
 use futures::future::BoxFuture;
 use futures::stream::BoxStream;
 use futures::{ready, FutureExt, Stream, StreamExt};

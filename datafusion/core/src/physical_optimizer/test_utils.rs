@@ -84,15 +84,21 @@ async fn register_current_csv(
     Ok(())
 }
 
+/// Source type.
 #[derive(Eq, PartialEq, Debug)]
 pub enum SourceType {
+    /// Unbounded source.
     Unbounded,
+    /// Bounded source.
     Bounded,
 }
 
+/// Represents sql test cast.
 #[async_trait]
 pub trait SqlTestCase {
+    /// Register table for this case.
     async fn register_table(&self, ctx: &SessionContext) -> Result<()>;
+    /// Tell if fail is expected.
     fn expect_fail(&self) -> bool;
 }
 
@@ -135,6 +141,7 @@ impl SqlTestCase for BinaryTestCase {
     }
 }
 
+/// Describes a query test case.
 pub struct QueryCase {
     pub(crate) sql: String,
     pub(crate) cases: Vec<Arc<dyn SqlTestCase>>,
@@ -174,6 +181,7 @@ impl QueryCase {
     }
 }
 
+/// Build sort merge join execution plan node.
 pub fn sort_merge_join_exec(
     left: Arc<dyn ExecutionPlan>,
     right: Arc<dyn ExecutionPlan>,
@@ -211,6 +219,7 @@ pub fn sort_expr_options(
     }
 }
 
+/// Build physical plan node that coalesces partitions.
 pub fn coalesce_partitions_exec(input: Arc<dyn ExecutionPlan>) -> Arc<dyn ExecutionPlan> {
     Arc::new(CoalescePartitionsExec::new(input))
 }
@@ -219,6 +228,7 @@ pub(crate) fn memory_exec(schema: &SchemaRef) -> Arc<dyn ExecutionPlan> {
     Arc::new(MemoryExec::try_new(&[vec![]], schema.clone(), None).unwrap())
 }
 
+/// Build hash join execution plan node.
 pub fn hash_join_exec(
     left: Arc<dyn ExecutionPlan>,
     right: Arc<dyn ExecutionPlan>,
@@ -238,6 +248,7 @@ pub fn hash_join_exec(
     )?))
 }
 
+/// Build bounded window execution plan node.
 pub fn bounded_window_exec(
     col_name: &str,
     sort_exprs: impl IntoIterator<Item = PhysicalSortExpr>,
@@ -267,6 +278,7 @@ pub fn bounded_window_exec(
     )
 }
 
+/// Build filter execution plan node.
 pub fn filter_exec(
     predicate: Arc<dyn PhysicalExpr>,
     input: Arc<dyn ExecutionPlan>,
@@ -274,6 +286,7 @@ pub fn filter_exec(
     Arc::new(FilterExec::try_new(predicate, input).unwrap())
 }
 
+/// Build merge execution node that preserves sort.
 pub fn sort_preserving_merge_exec(
     sort_exprs: impl IntoIterator<Item = PhysicalSortExpr>,
     input: Arc<dyn ExecutionPlan>,
@@ -291,7 +304,7 @@ pub fn parquet_exec(schema: &SchemaRef) -> Arc<ParquetExec> {
     .build_arc()
 }
 
-// Created a sorted parquet exec
+/// Created a sorted parquet exec
 pub fn parquet_exec_sorted(
     schema: &SchemaRef,
     sort_exprs: impl IntoIterator<Item = PhysicalSortExpr>,
@@ -306,26 +319,32 @@ pub fn parquet_exec_sorted(
     .build_arc()
 }
 
+/// Build a union execution plan node.
 pub fn union_exec(input: Vec<Arc<dyn ExecutionPlan>>) -> Arc<dyn ExecutionPlan> {
     Arc::new(UnionExec::new(input))
 }
 
+/// Build a limit execution plan node.
 pub fn limit_exec(input: Arc<dyn ExecutionPlan>) -> Arc<dyn ExecutionPlan> {
     global_limit_exec(local_limit_exec(input))
 }
 
+/// Build a local limit execution plan node.
 pub fn local_limit_exec(input: Arc<dyn ExecutionPlan>) -> Arc<dyn ExecutionPlan> {
     Arc::new(LocalLimitExec::new(input, 100))
 }
 
+/// Build a global limit execution plan node.
 pub fn global_limit_exec(input: Arc<dyn ExecutionPlan>) -> Arc<dyn ExecutionPlan> {
     Arc::new(GlobalLimitExec::new(input, 0, Some(100)))
 }
 
+/// Build a repartition execution plan node.
 pub fn repartition_exec(input: Arc<dyn ExecutionPlan>) -> Arc<dyn ExecutionPlan> {
     Arc::new(RepartitionExec::try_new(input, Partitioning::RoundRobinBatch(10)).unwrap())
 }
 
+/// Build a repartition execution plan that preserves an order.
 pub fn spr_repartition_exec(input: Arc<dyn ExecutionPlan>) -> Arc<dyn ExecutionPlan> {
     Arc::new(
         RepartitionExec::try_new(input, Partitioning::RoundRobinBatch(10))
@@ -334,6 +353,7 @@ pub fn spr_repartition_exec(input: Arc<dyn ExecutionPlan>) -> Arc<dyn ExecutionP
     )
 }
 
+/// Build an aggregate execution plan.
 pub fn aggregate_exec(input: Arc<dyn ExecutionPlan>) -> Arc<dyn ExecutionPlan> {
     let schema = input.schema();
     Arc::new(
@@ -349,10 +369,12 @@ pub fn aggregate_exec(input: Arc<dyn ExecutionPlan>) -> Arc<dyn ExecutionPlan> {
     )
 }
 
+/// Build coalesce batches execution plan.
 pub fn coalesce_batches_exec(input: Arc<dyn ExecutionPlan>) -> Arc<dyn ExecutionPlan> {
     Arc::new(CoalesceBatchesExec::new(input, 128))
 }
 
+/// Build sort execution plan.
 pub fn sort_exec(
     sort_exprs: impl IntoIterator<Item = PhysicalSortExpr>,
     input: Arc<dyn ExecutionPlan>,
@@ -370,6 +392,7 @@ pub struct RequirementsTestExec {
 }
 
 impl RequirementsTestExec {
+    /// Make a new [`RequirementsTestExec`].
     pub fn new(input: Arc<dyn ExecutionPlan>) -> Self {
         Self {
             required_input_ordering: vec![],

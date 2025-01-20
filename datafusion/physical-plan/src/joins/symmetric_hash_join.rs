@@ -46,12 +46,10 @@ use crate::joins::utils::{
     JoinHashMapType, JoinOn, JoinOnRef, StatefulStreamResult,
 };
 use crate::{
-    execution_mode_from_children,
-    expressions::PhysicalSortExpr,
-    joins::StreamJoinPartitionMode,
-    metrics::{ExecutionPlanMetricsSet, MetricsSet},
-    DisplayAs, DisplayFormatType, Distribution, ExecutionPlan, ExecutionPlanProperties,
-    PlanProperties, RecordBatchStream, SendableRecordBatchStream, Statistics,
+    execution_mode_from_children, expressions::PhysicalSortExpr,
+    joins::StreamJoinPartitionMode, DisplayAs, DisplayFormatType, Distribution,
+    ExecutionPlan, ExecutionPlanProperties, PlanProperties, RecordBatchStream,
+    SendableRecordBatchStream, Statistics,
 };
 
 use arrow::array::{
@@ -178,8 +176,6 @@ pub struct SymmetricHashJoinExec {
     pub(crate) join_type: JoinType,
     /// Shares the `RandomState` for the hashing algorithm
     random_state: RandomState,
-    /// Execution metrics
-    metrics: ExecutionPlanMetricsSet,
     /// Information of index and left / right placement of columns
     column_indices: Vec<ColumnIndex>,
     /// If null_equals_null is true, null == null else null != null
@@ -242,7 +238,6 @@ impl SymmetricHashJoinExec {
             filter,
             join_type: *join_type,
             random_state,
-            metrics: ExecutionPlanMetricsSet::new(),
             column_indices,
             null_equals_null,
             left_sort_exprs,
@@ -443,10 +438,6 @@ impl ExecutionPlan for SymmetricHashJoinExec {
         )?))
     }
 
-    fn metrics(&self) -> Option<MetricsSet> {
-        Some(self.metrics.clone_inner())
-    }
-
     fn statistics(&self) -> Result<Statistics> {
         // TODO stats: it is not possible in general to know the output size of joins
         Ok(Statistics::new_unknown(&self.schema()))
@@ -510,6 +501,7 @@ impl ExecutionPlan for SymmetricHashJoinExec {
             None
         };
 
+        let metrics = context.get_or_register_metric_set(self);
         Ok(Box::pin(SymmetricHashJoinStream {
             left_stream,
             right_stream,
@@ -520,7 +512,7 @@ impl ExecutionPlan for SymmetricHashJoinExec {
             left: left_side_joiner,
             right: right_side_joiner,
             column_indices: self.column_indices.clone(),
-            metrics: StreamJoinMetrics::new(partition, &self.metrics),
+            metrics: StreamJoinMetrics::new(partition, &metrics),
             graph,
             left_sorted_filter_expr,
             right_sorted_filter_expr,

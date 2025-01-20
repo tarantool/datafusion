@@ -22,8 +22,7 @@ use std::collections::{HashMap, VecDeque};
 use std::sync::Arc;
 
 use crate::joins::utils::{JoinFilter, JoinHashMapType};
-use crate::metrics::{ExecutionPlanMetricsSet, MetricBuilder};
-use crate::{metrics, ExecutionPlan};
+use crate::ExecutionPlan;
 
 use arrow::compute::concat_batches;
 use arrow_array::{ArrowPrimitiveType, NativeAdapter, PrimitiveArray, RecordBatch};
@@ -34,6 +33,7 @@ use datafusion_common::{
     arrow_datafusion_err, plan_datafusion_err, DataFusionError, JoinSide, Result,
     ScalarValue,
 };
+use datafusion_execution::metrics::{self, ExecutionPlanMetricsSet, MetricBuilder};
 use datafusion_expr::interval_arithmetic::Interval;
 use datafusion_physical_expr::expressions::Column;
 use datafusion_physical_expr::intervals::cp_solver::ExprIntervalGraph;

@@ -26,7 +26,7 @@ use datafusion::{
         physical_plan::{CsvConfig, CsvOpener, FileScanConfig, FileStream},
     },
     error::Result,
-    physical_plan::metrics::ExecutionPlanMetricsSet,
+    execution::metrics::ExecutionPlanMetricsSet,
     test_util::aggr_test_schema,
 };
 

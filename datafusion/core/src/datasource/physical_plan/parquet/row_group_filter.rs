@@ -364,7 +364,7 @@ impl<'a> RowGroupPruningStatistics<'a> {
     }
 }
 
-impl<'a> PruningStatistics for RowGroupPruningStatistics<'a> {
+impl PruningStatistics for RowGroupPruningStatistics<'_> {
     fn min_values(&self, column: &Column) -> Option<ArrayRef> {
         self.statistics_converter(column)
             .and_then(|c| Ok(c.row_group_mins(self.metadata_iter())?))
@@ -413,11 +413,11 @@ mod tests {
 
     use super::*;
     use crate::datasource::physical_plan::parquet::reader::ParquetFileReader;
-    use crate::physical_plan::metrics::ExecutionPlanMetricsSet;
 
     use arrow::datatypes::DataType::Decimal128;
     use arrow::datatypes::{DataType, Field};
     use datafusion_common::Result;
+    use datafusion_execution::metrics::ExecutionPlanMetricsSet;
     use datafusion_expr::{cast, col, lit, Expr};
     use datafusion_physical_expr::planner::logical2physical;
 

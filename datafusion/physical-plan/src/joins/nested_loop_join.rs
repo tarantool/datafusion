@@ -33,7 +33,6 @@ use crate::joins::utils::{
     get_final_indices_from_bit_map, BuildProbeJoinMetrics, ColumnIndex, JoinFilter,
     OnceAsync, OnceFut,
 };
-use crate::metrics::{ExecutionPlanMetricsSet, MetricsSet};
 use crate::{
     execution_mode_from_children, DisplayAs, DisplayFormatType, Distribution,
     ExecutionMode, ExecutionPlan, ExecutionPlanProperties, PlanProperties,
@@ -152,8 +151,6 @@ pub struct NestedLoopJoinExec {
     inner_table: OnceAsync<JoinLeftData>,
     /// Information of index and left / right placement of columns
     column_indices: Vec<ColumnIndex>,
-    /// Execution metrics
-    metrics: ExecutionPlanMetricsSet,
     /// Cache holding plan properties like equivalences, output partitioning etc.
     cache: PlanProperties,
 }
@@ -183,7 +180,6 @@ impl NestedLoopJoinExec {
             schema,
             inner_table: Default::default(),
             column_indices,
-            metrics: Default::default(),
             cache,
         })
     }
@@ -299,7 +295,8 @@ impl ExecutionPlan for NestedLoopJoinExec {
         partition: usize,
         context: Arc<TaskContext>,
     ) -> Result<SendableRecordBatchStream> {
-        let join_metrics = BuildProbeJoinMetrics::new(partition, &self.metrics);
+        let metrics = context.get_or_register_metric_set(self);
+        let join_metrics = BuildProbeJoinMetrics::new(partition, &metrics);
 
         // Initialization reservation for load of inner table
         let load_reservation =
@@ -323,7 +320,7 @@ impl ExecutionPlan for NestedLoopJoinExec {
         } else {
             None
         };
-        let outer_table = self.right.execute(partition, context)?;
+        let outer_table = self.right.execute(partition, Arc::clone(&context))?;
 
         Ok(Box::pin(NestedLoopJoinStream {
             schema: Arc::clone(&self.schema),
@@ -335,10 +332,6 @@ impl ExecutionPlan for NestedLoopJoinExec {
             column_indices: self.column_indices.clone(),
             join_metrics,
         }))
-    }
-
-    fn metrics(&self) -> Option<MetricsSet> {
-        Some(self.metrics.clone_inner())
     }
 
     fn statistics(&self) -> Result<Statistics> {

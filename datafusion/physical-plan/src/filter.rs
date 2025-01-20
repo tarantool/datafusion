@@ -25,10 +25,7 @@ use super::{
     RecordBatchStream, SendableRecordBatchStream, Statistics,
 };
 use crate::common::can_project;
-use crate::{
-    metrics::{BaselineMetrics, ExecutionPlanMetricsSet, MetricsSet},
-    DisplayFormatType, ExecutionPlan,
-};
+use crate::{DisplayFormatType, ExecutionPlan};
 
 use arrow::compute::filter_record_batch;
 use arrow::datatypes::{DataType, SchemaRef};
@@ -38,6 +35,7 @@ use datafusion_common::stats::Precision;
 use datafusion_common::{
     internal_err, plan_err, project_schema, DataFusionError, Result,
 };
+use datafusion_execution::metrics::BaselineMetrics;
 use datafusion_execution::TaskContext;
 use datafusion_expr::Operator;
 use datafusion_physical_expr::equivalence::ProjectionMapping;
@@ -59,8 +57,6 @@ pub struct FilterExec {
     predicate: Arc<dyn PhysicalExpr>,
     /// The input plan
     input: Arc<dyn ExecutionPlan>,
-    /// Execution metrics
-    metrics: ExecutionPlanMetricsSet,
     /// Selectivity for statistics. 0 = no rows, 100 = all rows
     default_selectivity: u8,
     /// Properties equivalence properties, partitioning, etc.
@@ -87,7 +83,6 @@ impl FilterExec {
                 Ok(Self {
                     predicate,
                     input: Arc::clone(&input),
-                    metrics: ExecutionPlanMetricsSet::new(),
                     default_selectivity,
                     cache,
                     projection: None,
@@ -134,7 +129,6 @@ impl FilterExec {
         Ok(Self {
             predicate: Arc::clone(&self.predicate),
             input: Arc::clone(&self.input),
-            metrics: self.metrics.clone(),
             default_selectivity: self.default_selectivity,
             cache,
             projection,
@@ -353,20 +347,18 @@ impl ExecutionPlan for FilterExec {
         context: Arc<TaskContext>,
     ) -> Result<SendableRecordBatchStream> {
         trace!("Start FilterExec::execute for partition {} of context session_id {} and task_id {:?}", partition, context.session_id(), context.task_id());
-        let baseline_metrics = BaselineMetrics::new(&self.metrics, partition);
+        let metrics = context.get_or_register_metric_set(self);
+        let baseline_metrics = BaselineMetrics::new(&metrics, partition);
         let (predicate, _) =
             resolve_placeholders(&self.predicate, context.param_values())?;
+
         Ok(Box::pin(FilterExecStream {
             schema: self.schema(),
             predicate: predicate,
-            input: self.input.execute(partition, context)?,
+            input: self.input.execute(partition, Arc::clone(&context))?,
             baseline_metrics,
             projection: self.projection.clone(),
         }))
-    }
-
-    fn metrics(&self) -> Option<MetricsSet> {
-        Some(self.metrics.clone_inner())
     }
 
     /// The output statistics of a filtering operation can be estimated if the

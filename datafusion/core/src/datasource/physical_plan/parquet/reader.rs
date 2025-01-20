@@ -20,7 +20,7 @@
 
 use crate::datasource::physical_plan::{FileMeta, ParquetFileMetrics};
 use bytes::Bytes;
-use datafusion_physical_plan::metrics::ExecutionPlanMetricsSet;
+use datafusion_execution::metrics::ExecutionPlanMetricsSet;
 use futures::future::BoxFuture;
 use object_store::ObjectStore;
 use parquet::arrow::async_reader::{AsyncFileReader, ParquetObjectReader};

@@ -23,7 +23,6 @@ use std::sync::Arc;
 use crate::common::spawn_buffered;
 use crate::expressions::PhysicalSortExpr;
 use crate::limit::LimitStream;
-use crate::metrics::{BaselineMetrics, ExecutionPlanMetricsSet, MetricsSet};
 use crate::sorts::streaming_merge;
 use crate::{
     DisplayAs, DisplayFormatType, Distribution, ExecutionPlan, ExecutionPlanProperties,
@@ -32,6 +31,7 @@ use crate::{
 
 use datafusion_common::{internal_err, Result};
 use datafusion_execution::memory_pool::MemoryConsumer;
+use datafusion_execution::metrics::{BaselineMetrics, ExecutionPlanMetricsSet};
 use datafusion_execution::TaskContext;
 use datafusion_physical_expr::expressions::resolve_placeholders;
 use datafusion_physical_expr::PhysicalSortRequirement;
@@ -72,8 +72,6 @@ pub struct SortPreservingMergeExec {
     input: Arc<dyn ExecutionPlan>,
     /// Sort expressions
     expr: Vec<PhysicalSortExpr>,
-    /// Execution metrics
-    metrics: ExecutionPlanMetricsSet,
     /// Optional number of rows to fetch. Stops producing rows after this fetch
     fetch: Option<usize>,
     /// Cache holding plan properties like equivalences, output partitioning etc.
@@ -87,7 +85,6 @@ impl SortPreservingMergeExec {
         Self {
             input,
             expr,
-            metrics: ExecutionPlanMetricsSet::new(),
             fetch: None,
             cache,
         }
@@ -175,7 +172,6 @@ impl ExecutionPlan for SortPreservingMergeExec {
         Some(Arc::new(Self {
             input: Arc::clone(&self.input),
             expr: self.expr.clone(),
-            metrics: self.metrics.clone(),
             fetch: limit,
             cache: self.cache.clone(),
         }))
@@ -249,7 +245,7 @@ impl ExecutionPlan for SortPreservingMergeExec {
                         stream,
                         0,
                         Some(fetch),
-                        BaselineMetrics::new(&self.metrics, partition),
+                        BaselineMetrics::new(&ExecutionPlanMetricsSet::new(), partition),
                     )))
                 }
                 None => {
@@ -283,11 +279,12 @@ impl ExecutionPlan for SortPreservingMergeExec {
                     })
                     .collect::<Result<Vec<_>>>()?;
 
+                let metrics = context.get_or_register_metric_set(self);
                 let result = streaming_merge(
                     receivers,
                     schema,
                     &expr,
-                    BaselineMetrics::new(&self.metrics, partition),
+                    BaselineMetrics::new(&metrics, partition),
                     context.session_config().batch_size(),
                     self.fetch,
                     reservation,
@@ -298,10 +295,6 @@ impl ExecutionPlan for SortPreservingMergeExec {
                 Ok(result)
             }
         }
-    }
-
-    fn metrics(&self) -> Option<MetricsSet> {
-        Some(self.metrics.clone_inner())
     }
 
     fn statistics(&self) -> Result<Statistics> {
@@ -325,7 +318,6 @@ mod tests {
     use crate::coalesce_partitions::CoalescePartitionsExec;
     use crate::expressions::col;
     use crate::memory::MemoryExec;
-    use crate::metrics::{MetricValue, Timestamp};
     use crate::sorts::sort::SortExec;
     use crate::stream::RecordBatchReceiverStream;
     use crate::test::exec::{assert_strong_count_converges_to_zero, BlockingExec};
@@ -340,6 +332,7 @@ mod tests {
     use datafusion_common::{assert_batches_eq, assert_contains, DataFusionError};
     use datafusion_common_runtime::SpawnedTask;
     use datafusion_execution::config::SessionConfig;
+    use datafusion_execution::metrics::{MetricValue, Timestamp};
     use datafusion_execution::RecordBatchStream;
     use datafusion_physical_expr::expressions::Column;
     use datafusion_physical_expr::EquivalenceProperties;
@@ -1021,9 +1014,12 @@ mod tests {
         let exec = MemoryExec::try_new(&[vec![b1], vec![b2]], schema, None).unwrap();
         let merge = Arc::new(SortPreservingMergeExec::new(sort, Arc::new(exec)));
 
-        let collected = collect(Arc::clone(&merge) as Arc<dyn ExecutionPlan>, task_ctx)
-            .await
-            .unwrap();
+        let collected = collect(
+            Arc::clone(&merge) as Arc<dyn ExecutionPlan>,
+            Arc::clone(&task_ctx),
+        )
+        .await
+        .unwrap();
         let expected = [
             "+----+---+",
             "| a  | b |",
@@ -1037,8 +1033,7 @@ mod tests {
         assert_batches_eq!(expected, collected.as_slice());
 
         // Now, validate metrics
-        let metrics = merge.metrics().unwrap();
-
+        let metrics = task_ctx.plan_metrics(merge.as_any()).unwrap();
         assert_eq!(metrics.output_rows().unwrap(), 4);
         assert!(metrics.elapsed_compute().unwrap() > 0);
 

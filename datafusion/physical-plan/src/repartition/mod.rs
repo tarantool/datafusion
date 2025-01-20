@@ -25,12 +25,10 @@ use std::task::{Context, Poll};
 use std::{any::Any, vec};
 
 use super::common::SharedMemoryReservation;
-use super::metrics::{self, ExecutionPlanMetricsSet, MetricBuilder, MetricsSet};
 use super::{
     DisplayAs, ExecutionPlanProperties, RecordBatchStream, SendableRecordBatchStream,
 };
 use crate::hash_utils::create_hashes;
-use crate::metrics::BaselineMetrics;
 use crate::repartition::distributor_channels::{
     channels, partition_aware_channels, DistributionReceiver, DistributionSender,
 };
@@ -46,7 +44,10 @@ use datafusion_common::utils::transpose;
 use datafusion_common::{arrow_datafusion_err, not_impl_err, DataFusionError, Result};
 use datafusion_common_runtime::SpawnedTask;
 use datafusion_execution::memory_pool::MemoryConsumer;
-use datafusion_execution::TaskContext;
+use datafusion_execution::metrics::{
+    BaselineMetrics, ExecutionPlanMetricsSet, MetricBuilder,
+};
+use datafusion_execution::{metrics, TaskContext};
 use datafusion_physical_expr::{EquivalenceProperties, PhysicalExpr, PhysicalSortExpr};
 
 use futures::stream::Stream;
@@ -407,8 +408,6 @@ pub struct RepartitionExec {
     partitioning: Partitioning,
     /// Inner state that is initialized when the first output stream is created.
     state: LazyState,
-    /// Execution metrics
-    metrics: ExecutionPlanMetricsSet,
     /// Boolean flag to decide whether to preserve ordering. If true means
     /// `SortPreservingRepartitionExec`, false means `RepartitionExec`.
     preserve_order: bool,
@@ -566,10 +565,10 @@ impl ExecutionPlan for RepartitionExec {
             partition
         );
 
+        let metrics = context.get_or_register_metric_set(self);
         let lazy_state = Arc::clone(&self.state);
         let input = Arc::clone(&self.input);
         let partitioning = self.partitioning.clone();
-        let metrics = self.metrics.clone();
         let preserve_order = self.preserve_order;
         let name = self.name().to_owned();
         let schema = self.schema();
@@ -578,95 +577,94 @@ impl ExecutionPlan for RepartitionExec {
         // Get existing ordering to use for merging
         let sort_exprs = self.sort_exprs().unwrap_or(&[]).to_owned();
 
-        let stream = futures::stream::once(async move {
-            let num_input_partitions = input.output_partitioning().partition_count();
+        let stream = futures::stream::once({
+            let context = Arc::clone(&context);
+            let metrics = metrics.clone();
+            async move {
+                let num_input_partitions = input.output_partitioning().partition_count();
 
-            let input_captured = Arc::clone(&input);
-            let metrics_captured = metrics.clone();
-            let name_captured = name.clone();
-            let context_captured = Arc::clone(&context);
-            let state = lazy_state
-                .get_or_init(|| async move {
-                    Mutex::new(RepartitionExecState::new(
-                        input_captured,
-                        partitioning,
-                        metrics_captured,
-                        preserve_order,
-                        name_captured,
-                        context_captured,
-                    ))
-                })
-                .await;
-
-            // lock scope
-            let (mut rx, reservation, abort_helper) = {
-                // lock mutexes
-                let mut state = state.lock();
-
-                // now return stream for the specified *output* partition which will
-                // read from the channel
-                let (_tx, rx, reservation) = state
-                    .channels
-                    .remove(&partition)
-                    .expect("partition not used yet");
-
-                (rx, reservation, Arc::clone(&state.abort_helper))
-            };
-
-            trace!(
-                "Before returning stream in {}::execute for partition: {}",
-                name,
-                partition
-            );
-
-            if preserve_order {
-                // Store streams from all the input partitions:
-                let input_streams = rx
-                    .into_iter()
-                    .map(|receiver| {
-                        Box::pin(PerPartitionStream {
-                            schema: Arc::clone(&schema_captured),
-                            receiver,
-                            drop_helper: Arc::clone(&abort_helper),
-                            reservation: Arc::clone(&reservation),
-                        }) as SendableRecordBatchStream
+                let input_captured = Arc::clone(&input);
+                let metrics_captured = metrics.clone();
+                let name_captured = name.clone();
+                let context_captured = Arc::clone(&context);
+                let state = lazy_state
+                    .get_or_init(|| async move {
+                        Mutex::new(RepartitionExecState::new(
+                            input_captured,
+                            partitioning,
+                            metrics_captured,
+                            preserve_order,
+                            name_captured,
+                            context_captured,
+                        ))
                     })
-                    .collect::<Vec<_>>();
-                // Note that receiver size (`rx.len()`) and `num_input_partitions` are same.
+                    .await;
 
-                // Merge streams (while preserving ordering) coming from
-                // input partitions to this partition:
-                let fetch = None;
-                let merge_reservation =
-                    MemoryConsumer::new(format!("{}[Merge {partition}]", name))
-                        .register(context.memory_pool());
-                streaming_merge(
-                    input_streams,
-                    schema_captured,
-                    &sort_exprs,
-                    BaselineMetrics::new(&metrics, partition),
-                    context.session_config().batch_size(),
-                    fetch,
-                    merge_reservation,
-                )
-            } else {
-                Ok(Box::pin(RepartitionStream {
-                    num_input_partitions,
-                    num_input_partitions_processed: 0,
-                    schema: input.schema(),
-                    input: rx.swap_remove(0),
-                    drop_helper: abort_helper,
-                    reservation,
-                }) as SendableRecordBatchStream)
+                // lock scope
+                let (mut rx, reservation, abort_helper) = {
+                    // lock mutexes
+                    let mut state = state.lock();
+
+                    // now return stream for the specified *output* partition which will
+                    // read from the channel
+                    let (_tx, rx, reservation) = state
+                        .channels
+                        .remove(&partition)
+                        .expect("partition not used yet");
+
+                    (rx, reservation, Arc::clone(&state.abort_helper))
+                };
+
+                trace!(
+                    "Before returning stream in {}::execute for partition: {}",
+                    name,
+                    partition
+                );
+
+                if preserve_order {
+                    // Store streams from all the input partitions:
+                    let input_streams = rx
+                        .into_iter()
+                        .map(|receiver| {
+                            Box::pin(PerPartitionStream {
+                                schema: Arc::clone(&schema_captured),
+                                receiver,
+                                drop_helper: Arc::clone(&abort_helper),
+                                reservation: Arc::clone(&reservation),
+                            }) as SendableRecordBatchStream
+                        })
+                        .collect::<Vec<_>>();
+                    // Note that receiver size (`rx.len()`) and `num_input_partitions` are same.
+
+                    // Merge streams (while preserving ordering) coming from
+                    // input partitions to this partition:
+                    let fetch = None;
+                    let merge_reservation =
+                        MemoryConsumer::new(format!("{}[Merge {partition}]", name))
+                            .register(context.memory_pool());
+                    streaming_merge(
+                        input_streams,
+                        schema_captured,
+                        &sort_exprs,
+                        BaselineMetrics::new(&metrics, partition),
+                        context.session_config().batch_size(),
+                        fetch,
+                        merge_reservation,
+                    )
+                } else {
+                    Ok(Box::pin(RepartitionStream {
+                        num_input_partitions,
+                        num_input_partitions_processed: 0,
+                        schema: input.schema(),
+                        input: rx.swap_remove(0),
+                        drop_helper: abort_helper,
+                        reservation,
+                    }) as SendableRecordBatchStream)
+                }
             }
         })
         .try_flatten();
-        let stream = RecordBatchStreamAdapter::new(schema, stream);
-        Ok(Box::pin(stream))
-    }
-
-    fn metrics(&self) -> Option<MetricsSet> {
-        Some(self.metrics.clone_inner())
+        Ok(Box::pin(RecordBatchStreamAdapter::new(schema, stream)))
     }
 
     fn statistics(&self) -> Result<Statistics> {
@@ -689,7 +687,6 @@ impl RepartitionExec {
             input,
             partitioning,
             state: Default::default(),
-            metrics: ExecutionPlanMetricsSet::new(),
             preserve_order,
             cache,
         })

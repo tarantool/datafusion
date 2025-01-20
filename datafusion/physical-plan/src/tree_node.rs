@@ -17,10 +17,10 @@
 
 //! This module provides common traits for visiting or rewriting tree nodes easily.
 
-use std::fmt::{self, Display, Formatter};
+// use std::fmt::{self, Display, Formatter};
 use std::sync::Arc;
 
-use crate::{displayable, with_new_children_if_necessary, ExecutionPlan};
+use crate::{/*displayable,*/ with_new_children_if_necessary, ExecutionPlan};
 
 use datafusion_common::tree_node::{ConcreteTreeNode, DynTreeNode};
 use datafusion_common::Result;
@@ -81,14 +81,14 @@ impl<T: Default> PlanContext<T> {
     }
 }
 
-impl<T: Display> Display for PlanContext<T> {
-    fn fmt(&self, f: &mut Formatter<'_>) -> fmt::Result {
-        let node_string = displayable(self.plan.as_ref()).one_line();
-        write!(f, "Node plan: {}", node_string)?;
-        write!(f, "Node data: {}", self.data)?;
-        write!(f, "")
-    }
-}
+// impl<T: Display> Display for PlanContext<T> {
+//     fn fmt(&self, f: &mut Formatter<'_>) -> fmt::Result {
+//         let node_string = displayable(self.plan.as_ref()).one_line();
+//         write!(f, "Node plan: {}", node_string)?;
+//         write!(f, "Node data: {}", self.data)?;
+//         write!(f, "")
+//     }
+// }
 
 impl<T> ConcreteTreeNode for PlanContext<T> {
     fn children(&self) -> &[Self] {

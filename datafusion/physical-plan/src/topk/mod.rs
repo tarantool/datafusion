@@ -28,14 +28,13 @@ use arrow_schema::SchemaRef;
 use datafusion_common::Result;
 use datafusion_execution::{
     memory_pool::{MemoryConsumer, MemoryReservation},
+    metrics::{BaselineMetrics, Count, ExecutionPlanMetricsSet, MetricBuilder},
     runtime_env::RuntimeEnv,
 };
 use datafusion_physical_expr::PhysicalSortExpr;
 use hashbrown::HashMap;
 
 use crate::{stream::RecordBatchStreamAdapter, SendableRecordBatchStream};
-
-use super::metrics::{BaselineMetrics, Count, ExecutionPlanMetricsSet, MetricBuilder};
 
 /// Global TopK
 ///

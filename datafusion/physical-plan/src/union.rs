@@ -27,19 +27,17 @@ use std::task::{Context, Poll};
 use std::{any::Any, sync::Arc};
 
 use super::{
-    execution_mode_from_children,
-    metrics::{ExecutionPlanMetricsSet, MetricsSet},
-    ColumnStatistics, DisplayAs, DisplayFormatType, ExecutionPlan,
-    ExecutionPlanProperties, Partitioning, PlanProperties, RecordBatchStream,
-    SendableRecordBatchStream, Statistics,
+    execution_mode_from_children, ColumnStatistics, DisplayAs, DisplayFormatType,
+    ExecutionPlan, ExecutionPlanProperties, Partitioning, PlanProperties,
+    RecordBatchStream, SendableRecordBatchStream, Statistics,
 };
-use crate::metrics::BaselineMetrics;
 use crate::stream::ObservedStream;
 
 use arrow::datatypes::{Field, Schema, SchemaRef};
 use arrow::record_batch::RecordBatch;
 use datafusion_common::stats::Precision;
 use datafusion_common::{exec_err, internal_err, Result};
+use datafusion_execution::metrics::BaselineMetrics;
 use datafusion_execution::TaskContext;
 use datafusion_physical_expr::{calculate_union, EquivalenceProperties};
 
@@ -89,8 +87,6 @@ use tokio::macros::support::thread_rng_n;
 pub struct UnionExec {
     /// Input execution plan
     inputs: Vec<Arc<dyn ExecutionPlan>>,
-    /// Execution metrics
-    metrics: ExecutionPlanMetricsSet,
     /// Cache holding plan properties like equivalences, output partitioning etc.
     cache: PlanProperties,
 }
@@ -105,11 +101,7 @@ impl UnionExec {
         // Here, we know that schemas are consistent and the call below can
         // not return an error.
         let cache = Self::compute_properties(&inputs, schema).unwrap();
-        UnionExec {
-            inputs,
-            metrics: ExecutionPlanMetricsSet::new(),
-            cache,
-        }
+        UnionExec { inputs, cache }
     }
 
     /// Get inputs of the execution plan
@@ -217,7 +209,8 @@ impl ExecutionPlan for UnionExec {
         context: Arc<TaskContext>,
     ) -> Result<SendableRecordBatchStream> {
         trace!("Start UnionExec::execute for partition {} of context session_id {} and task_id {:?}", partition, context.session_id(), context.task_id());
-        let baseline_metrics = BaselineMetrics::new(&self.metrics, partition);
+        let metrics = context.get_or_register_metric_set(self);
+        let baseline_metrics = BaselineMetrics::new(&metrics, partition);
         // record the tiny amount of work done in this function so
         // elapsed_compute is reported as non zero
         let elapsed_compute = baseline_metrics.elapsed_compute().clone();
@@ -227,9 +220,11 @@ impl ExecutionPlan for UnionExec {
         for input in self.inputs.iter() {
             // Calculate whether partition belongs to the current partition
             if partition < input.output_partitioning().partition_count() {
-                let stream = input.execute(partition, context)?;
+                let stream = input.execute(partition, Arc::clone(&context))?;
+
                 debug!("Found a Union partition to execute");
-                return Ok(Box::pin(ObservedStream::new(stream, baseline_metrics)));
+                let stream = ObservedStream::new(stream, baseline_metrics);
+                return Ok(Box::pin(stream));
             } else {
                 partition -= input.output_partitioning().partition_count();
             }
@@ -238,10 +233,6 @@ impl ExecutionPlan for UnionExec {
         warn!("Error in Union: Partition {} not found", partition);
 
         exec_err!("Partition {partition} not found in Union")
-    }
-
-    fn metrics(&self) -> Option<MetricsSet> {
-        Some(self.metrics.clone_inner())
     }
 
     fn statistics(&self) -> Result<Statistics> {
@@ -302,8 +293,6 @@ impl ExecutionPlan for UnionExec {
 pub struct InterleaveExec {
     /// Input execution plan
     inputs: Vec<Arc<dyn ExecutionPlan>>,
-    /// Execution metrics
-    metrics: ExecutionPlanMetricsSet,
     /// Cache holding plan properties like equivalences, output partitioning etc.
     cache: PlanProperties,
 }
@@ -317,11 +306,7 @@ impl InterleaveExec {
             );
         }
         let cache = Self::compute_properties(&inputs);
-        Ok(InterleaveExec {
-            inputs,
-            metrics: ExecutionPlanMetricsSet::new(),
-            cache,
-        })
+        Ok(InterleaveExec { inputs, cache })
     }
 
     /// Get inputs of the execution plan
@@ -397,7 +382,8 @@ impl ExecutionPlan for InterleaveExec {
         context: Arc<TaskContext>,
     ) -> Result<SendableRecordBatchStream> {
         trace!("Start InterleaveExec::execute for partition {} of context session_id {} and task_id {:?}", partition, context.session_id(), context.task_id());
-        let baseline_metrics = BaselineMetrics::new(&self.metrics, partition);
+        let metrics = context.get_or_register_metric_set(self);
+        let baseline_metrics = BaselineMetrics::new(&metrics, partition);
         // record the tiny amount of work done in this function so
         // elapsed_compute is reported as non zero
         let elapsed_compute = baseline_metrics.elapsed_compute().clone();
@@ -417,16 +403,13 @@ impl ExecutionPlan for InterleaveExec {
                 self.schema(),
                 input_stream_vec,
             ));
-            return Ok(Box::pin(ObservedStream::new(stream, baseline_metrics)));
+            let observed_stream = ObservedStream::new(stream, baseline_metrics);
+            return Ok(Box::pin(observed_stream));
         }
 
         warn!("Error in InterleaveExec: Partition {} not found", partition);
 
         exec_err!("Partition {partition} not found in InterleaveExec")
-    }
-
-    fn metrics(&self) -> Option<MetricsSet> {
-        Some(self.metrics.clone_inner())
     }
 
     fn statistics(&self) -> Result<Statistics> {
