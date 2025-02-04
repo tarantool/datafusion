@@ -1970,7 +1970,7 @@ mod tests {
                         use_coalesce_batches,
                         is_first_acc,
                         spill,
-                        4200,
+                        4250,
                     )
                     .await?
                 }
