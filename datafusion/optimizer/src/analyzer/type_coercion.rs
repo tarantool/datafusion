@@ -257,7 +257,7 @@ impl<'a> TypeCoercionRewriter<'a> {
     }
 }
 
-impl<'a> TreeNodeRewriter for TypeCoercionRewriter<'a> {
+impl TreeNodeRewriter for TypeCoercionRewriter<'_> {
     type Node = Expr;
 
     fn f_up(&mut self, expr: Expr) -> Result<Transformed<Expr>> {

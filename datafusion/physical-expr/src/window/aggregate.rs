@@ -89,19 +89,18 @@ pub(super) fn resolve_physical_sort_placeholders(
         }
         // Build new group by vector.
         resolved_exprs.reserve(exprs.len());
-        for j in 0..i {
-            resolved_exprs.push(exprs[j].clone());
+        for expr in exprs.iter().take(i) {
+            resolved_exprs.push(expr.clone());
         }
         resolved_exprs.push(PhysicalSortExpr {
             expr: resolved,
-            options: expr.options.clone(),
+            options: expr.options,
         });
-        for j in (i + 1)..exprs.len() {
-            let e = &exprs[j];
-            let (resolved, _) = resolve_placeholders(&e.expr, param_values)?;
+        for expr in exprs.iter().take(i + 1) {
+            let (resolved, _) = resolve_placeholders(&expr.expr, param_values)?;
             resolved_exprs.push(PhysicalSortExpr {
                 expr: resolved,
-                options: e.options.clone(),
+                options: expr.options,
             });
         }
     }
@@ -215,7 +214,7 @@ impl WindowExpr for PlainAggregateWindowExpr {
                     partition_by: partition_by
                         .unwrap_or_else(|| self.partition_by.clone()),
                     order_by: order_by.unwrap_or_else(|| self.order_by.clone()),
-                    window_frame: self.window_frame.clone(),
+                    window_frame: Arc::clone(&self.window_frame),
                 }))
             } else {
                 None

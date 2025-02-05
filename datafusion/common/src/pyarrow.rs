@@ -111,6 +111,7 @@ mod tests {
         })
     }
 
+    #[allow(unexpected_cfgs)]
     #[test]
     fn test_roundtrip() {
         init_python();
@@ -134,6 +135,7 @@ mod tests {
         });
     }
 
+    #[allow(unexpected_cfgs)]
     #[test]
     fn test_py_scalar() {
         init_python();

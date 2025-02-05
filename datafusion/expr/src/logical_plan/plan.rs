@@ -1530,7 +1530,7 @@ impl LogicalPlan {
         // Boilerplate structure to wrap LogicalPlan with something
         // that that can be formatted
         struct Wrapper<'a>(&'a LogicalPlan);
-        impl<'a> Display for Wrapper<'a> {
+        impl Display for Wrapper<'_> {
             fn fmt(&self, f: &mut Formatter) -> fmt::Result {
                 let with_schema = false;
                 let mut visitor = IndentVisitor::new(f, with_schema);
@@ -1573,7 +1573,7 @@ impl LogicalPlan {
         // Boilerplate structure to wrap LogicalPlan with something
         // that that can be formatted
         struct Wrapper<'a>(&'a LogicalPlan);
-        impl<'a> Display for Wrapper<'a> {
+        impl Display for Wrapper<'_> {
             fn fmt(&self, f: &mut Formatter) -> fmt::Result {
                 let with_schema = true;
                 let mut visitor = IndentVisitor::new(f, with_schema);
@@ -1593,7 +1593,7 @@ impl LogicalPlan {
         // Boilerplate structure to wrap LogicalPlan with something
         // that that can be formatted
         struct Wrapper<'a>(&'a LogicalPlan);
-        impl<'a> Display for Wrapper<'a> {
+        impl Display for Wrapper<'_> {
             fn fmt(&self, f: &mut Formatter) -> fmt::Result {
                 let mut visitor = PgJsonVisitor::new(f);
                 visitor.with_schema(true);
@@ -1639,7 +1639,7 @@ impl LogicalPlan {
         // Boilerplate structure to wrap LogicalPlan with something
         // that that can be formatted
         struct Wrapper<'a>(&'a LogicalPlan);
-        impl<'a> Display for Wrapper<'a> {
+        impl Display for Wrapper<'_> {
             fn fmt(&self, f: &mut Formatter) -> fmt::Result {
                 let mut visitor = GraphvizVisitor::new(f);
 
@@ -1690,7 +1690,7 @@ impl LogicalPlan {
         // Boilerplate structure to wrap LogicalPlan with something
         // that that can be formatted
         struct Wrapper<'a>(&'a LogicalPlan);
-        impl<'a> Display for Wrapper<'a> {
+        impl Display for Wrapper<'_> {
             fn fmt(&self, f: &mut Formatter) -> fmt::Result {
                 match self.0 {
                     LogicalPlan::EmptyRelation(_) => write!(f, "EmptyRelation"),

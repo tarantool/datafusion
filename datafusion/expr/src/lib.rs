@@ -16,6 +16,7 @@
 // under the License.
 // Make cheap clones clear: https://github.com/apache/datafusion/issues/11143
 #![deny(clippy::clone_on_ref_ptr)]
+#![allow(unexpected_cfgs)]
 
 //! [DataFusion](https://github.com/apache/datafusion)
 //! is an extensible query execution framework that uses

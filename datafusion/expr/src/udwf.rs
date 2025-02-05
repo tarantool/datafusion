@@ -504,7 +504,7 @@ impl WindowUDFImpl for AliasedWindowUDFImpl {
         let inner = self.inner.resolve_placeholders(param_values)?;
         Ok(if let Some(inner) = inner {
             Some(Arc::new(Self {
-                inner: inner,
+                inner,
                 aliases: self.aliases.clone(),
             }))
         } else {

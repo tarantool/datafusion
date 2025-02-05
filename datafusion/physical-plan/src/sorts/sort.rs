@@ -904,7 +904,7 @@ impl ExecutionPlan for SortExec {
                     resolve_placeholders(&pe.expr, context.param_values())?;
                 Ok(PhysicalSortExpr {
                     expr: resolved,
-                    options: pe.options.clone(),
+                    options: pe.options,
                 })
             })
             .collect::<Result<_>>()?;

@@ -20,7 +20,7 @@ use datafusion_common::{not_impl_err, DFSchema, Result};
 use datafusion_expr::Expr;
 use sqlparser::ast::{Expr as SQLExpr, UnaryOperator, Value};
 
-impl<'a, S: ContextProvider> SqlToRel<'a, S> {
+impl<S: ContextProvider> SqlToRel<'_, S> {
     pub(crate) fn parse_sql_unary_op(
         &self,
         op: UnaryOperator,

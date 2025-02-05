@@ -69,7 +69,7 @@ use crate::utils::log_plan;
 ///
 /// [`AnalyzerRule`]: crate::analyzer::AnalyzerRule
 /// [`SessionState::add_optimizer_rule`]: https://docs.rs/datafusion/latest/datafusion/execution/session_state/struct.SessionState.html#method.add_optimizer_rule
-
+///
 pub trait OptimizerRule {
     /// Try and rewrite `plan` to an optimized form, returning None if the plan
     /// cannot be optimized by this rule.
@@ -308,7 +308,7 @@ impl<'a> Rewriter<'a> {
     }
 }
 
-impl<'a> TreeNodeRewriter for Rewriter<'a> {
+impl TreeNodeRewriter for Rewriter<'_> {
     type Node = LogicalPlan;
 
     fn f_down(&mut self, node: LogicalPlan) -> Result<Transformed<LogicalPlan>> {

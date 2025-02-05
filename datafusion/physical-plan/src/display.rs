@@ -138,7 +138,7 @@ impl<'a> DisplayableExecutionPlan<'a> {
             show_schema: bool,
             task_ctx: Option<Arc<TaskContext>>,
         }
-        impl<'a> fmt::Display for Wrapper<'a> {
+        impl fmt::Display for Wrapper<'_> {
             fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
                 let mut visitor = IndentVisitor {
                     t: self.format_type,
@@ -180,7 +180,7 @@ impl<'a> DisplayableExecutionPlan<'a> {
             show_statistics: bool,
             task_ctx: Option<Arc<TaskContext>>,
         }
-        impl<'a> fmt::Display for Wrapper<'a> {
+        impl fmt::Display for Wrapper<'_> {
             fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
                 let t = DisplayFormatType::Default;
 
@@ -222,7 +222,7 @@ impl<'a> DisplayableExecutionPlan<'a> {
             task_ctx: Option<Arc<TaskContext>>,
         }
 
-        impl<'a> fmt::Display for Wrapper<'a> {
+        impl fmt::Display for Wrapper<'_> {
             fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
                 let mut visitor = IndentVisitor {
                     f,
@@ -292,7 +292,7 @@ struct IndentVisitor<'a, 'b> {
     task_ctx: Option<Arc<TaskContext>>,
 }
 
-impl<'a, 'b> ExecutionPlanVisitor for IndentVisitor<'a, 'b> {
+impl ExecutionPlanVisitor for IndentVisitor<'_, '_> {
     type Error = fmt::Error;
     fn pre_visit(&mut self, plan: &dyn ExecutionPlan) -> Result<bool, Self::Error> {
         write!(self.f, "{:indent$}", "", indent = self.indent * 2)?;
@@ -376,7 +376,7 @@ impl ExecutionPlanVisitor for GraphvizVisitor<'_, '_> {
 
         struct Wrapper<'a>(&'a dyn ExecutionPlan, DisplayFormatType);
 
-        impl<'a> std::fmt::Display for Wrapper<'a> {
+        impl std::fmt::Display for Wrapper<'_> {
             fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
                 self.0.fmt_as(self.1, f)
             }
@@ -476,7 +476,7 @@ impl<T: DisplayAs> fmt::Display for VerboseDisplay<T> {
 #[derive(Debug)]
 pub struct ProjectSchemaDisplay<'a>(pub &'a SchemaRef);
 
-impl<'a> fmt::Display for ProjectSchemaDisplay<'a> {
+impl fmt::Display for ProjectSchemaDisplay<'_> {
     fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
         let parts: Vec<_> = self
             .0
@@ -492,7 +492,7 @@ impl<'a> fmt::Display for ProjectSchemaDisplay<'a> {
 #[derive(Debug)]
 pub struct OutputOrderingDisplay<'a>(pub &'a [PhysicalSortExpr]);
 
-impl<'a> fmt::Display for OutputOrderingDisplay<'a> {
+impl fmt::Display for OutputOrderingDisplay<'_> {
     fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
         write!(f, "[")?;
         for (i, e) in self.0.iter().enumerate() {

@@ -30,7 +30,7 @@ use sqlparser::ast::{
     SetExpr, Value,
 };
 
-impl<'a, S: ContextProvider> SqlToRel<'a, S> {
+impl<S: ContextProvider> SqlToRel<'_, S> {
     /// Generate a logical plan from an SQL query/subquery
     pub(crate) fn query_to_plan(
         &self,

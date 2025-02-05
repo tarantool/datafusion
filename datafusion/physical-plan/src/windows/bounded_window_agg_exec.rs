@@ -304,7 +304,7 @@ impl ExecutionPlan for BoundedWindowAggExec {
             .iter()
             .map(|e| {
                 Ok(e.resolve_placeholders(param_values)?
-                    .unwrap_or_else(|| Arc::clone(&e)))
+                    .unwrap_or_else(|| Arc::clone(e)))
             })
             .collect::<Result<_>>()?;
 

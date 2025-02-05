@@ -539,10 +539,8 @@ impl AggregateFunctionExpr {
         param_values: &Option<ParamValues>,
     ) -> Result<Option<Arc<Self>>> {
         Ok(
-            if let Some(resolved_args) =
-                resolve_placeholders_seq(&self.args, param_values)?
-            {
-                Some(Arc::new(AggregateFunctionExpr {
+            resolve_placeholders_seq(&self.args, param_values)?.map(|resolved_args| {
+                Arc::new(AggregateFunctionExpr {
                     fun: self.fun.clone(),
                     args: resolved_args,
                     data_type: self.data_type.clone(),
@@ -555,11 +553,8 @@ impl AggregateFunctionExpr {
                     is_reversed: self.is_reversed,
                     input_types: self.input_types.clone(),
                     is_nullable: self.is_nullable,
-                }))
-            } else {
-                // Args do not contain placeholders at all.
-                None
-            },
+                })
+            }),
         )
     }
 }

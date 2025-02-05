@@ -17,6 +17,7 @@
 
 //! Tests for the DataFusion SQL query planner that require functions from the
 //! datafusion-functions crate.
+#![allow(unexpected_cfgs)]
 
 use std::any::Any;
 use std::collections::HashMap;
