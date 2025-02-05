@@ -123,7 +123,7 @@ pub fn resolve_placeholders(
         param_values: &'a Option<ParamValues>,
     }
 
-    impl<'a> TreeNodeRewriter for PlaceholderRewriter<'a> {
+    impl TreeNodeRewriter for PlaceholderRewriter<'_> {
         type Node = Arc<dyn PhysicalExpr>;
 
         fn f_up(&mut self, node: Self::Node) -> Result<Transformed<Self::Node>> {
@@ -132,7 +132,7 @@ pub fn resolve_placeholders(
                     if let Some(param_values) = self.param_values {
                         /* Extract a value and cast to the target type. */
                         let value = param_values
-                            .get_placeholders_with_values(&id)?
+                            .get_placeholders_with_values(id)?
                             .cast_to(data_type)?;
                         Ok(Transformed::yes(lit(value)))
                     } else {
@@ -145,9 +145,7 @@ pub fn resolve_placeholders(
         }
     }
 
-    let rewrited = Arc::clone(&expr).rewrite(&mut PlaceholderRewriter {
-        param_values: &param_values,
-    })?;
+    let rewrited = Arc::clone(expr).rewrite(&mut PlaceholderRewriter { param_values })?;
 
     Ok((rewrited.data, rewrited.transformed))
 }
@@ -155,7 +153,7 @@ pub fn resolve_placeholders(
 /// Resolves all placeholders in the seq of physical expressions,
 /// if there are no placeholders returns `None`, otherwise creates
 /// and returns a new vector where all placeholders are resolved.
-pub fn resolve_placeholders_seq<'a>(
+pub fn resolve_placeholders_seq(
     exprs: &[Arc<dyn PhysicalExpr>],
     param_values: &Option<ParamValues>,
 ) -> Result<Option<Vec<Arc<dyn PhysicalExpr>>>> {
@@ -168,13 +166,13 @@ pub fn resolve_placeholders_seq<'a>(
         }
         // Create new vector and collect all expressions.
         let mut result = Vec::with_capacity(exprs.len());
-        for j in 0..i {
+        for expr in exprs.iter().take(i) {
             // We know that there are no placeholders at the prefix.
-            result.push(Arc::clone(&exprs[j]));
+            result.push(Arc::clone(expr));
         }
         result.push(resolved_expr);
-        for j in i + 1..exprs.len() {
-            let (resolved_expr, _) = resolve_placeholders(&exprs[j], param_values)?;
+        for expr in exprs.iter().skip(i + 1) {
+            let (resolved_expr, _) = resolve_placeholders(expr, param_values)?;
             result.push(resolved_expr);
         }
         return Ok(Some(result));

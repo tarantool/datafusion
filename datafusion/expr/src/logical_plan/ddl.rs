@@ -122,7 +122,7 @@ impl DdlStatement {
     /// See [crate::LogicalPlan::display] for an example
     pub fn display(&self) -> impl fmt::Display + '_ {
         struct Wrapper<'a>(&'a DdlStatement);
-        impl<'a> Display for Wrapper<'a> {
+        impl Display for Wrapper<'_> {
             fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
                 match self.0 {
                     DdlStatement::CreateExternalTable(CreateExternalTable {

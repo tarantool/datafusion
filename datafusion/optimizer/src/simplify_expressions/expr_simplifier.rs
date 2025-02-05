@@ -484,7 +484,7 @@ enum ConstSimplifyResult {
     SimplifyRuntimeError(DataFusionError, Expr),
 }
 
-impl<'a> TreeNodeRewriter for ConstEvaluator<'a> {
+impl TreeNodeRewriter for ConstEvaluator<'_> {
     type Node = Expr;
 
     fn f_down(&mut self, expr: Expr) -> Result<Transformed<Expr>> {
@@ -705,7 +705,7 @@ impl<'a, S> Simplifier<'a, S> {
     }
 }
 
-impl<'a, S: SimplifyInfo> TreeNodeRewriter for Simplifier<'a, S> {
+impl<S: SimplifyInfo> TreeNodeRewriter for Simplifier<'_, S> {
     type Node = Expr;
 
     /// rewrite the expression simplifying any constant expressions

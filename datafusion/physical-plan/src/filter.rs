@@ -354,7 +354,7 @@ impl ExecutionPlan for FilterExec {
 
         Ok(Box::pin(FilterExecStream {
             schema: self.schema(),
-            predicate: predicate,
+            predicate,
             input: self.input.execute(partition, Arc::clone(&context))?,
             baseline_metrics,
             projection: self.projection.clone(),

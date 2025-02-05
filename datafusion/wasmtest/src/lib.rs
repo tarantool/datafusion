@@ -14,6 +14,8 @@
 // KIND, either express or implied.  See the License for the
 // specific language governing permissions and limitations
 // under the License.
+#![allow(unexpected_cfgs)]
+
 extern crate wasm_bindgen;
 
 use datafusion_common::{DFSchema, ScalarValue};

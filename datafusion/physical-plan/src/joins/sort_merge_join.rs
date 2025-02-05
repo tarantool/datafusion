@@ -1068,14 +1068,14 @@ impl SMJStream {
             return Ok(Ordering::Less);
         }
 
-        return compare_join_arrays(
+        compare_join_arrays(
             &self.streamed_batch.join_arrays,
             self.streamed_batch.idx,
             &self.buffered_data.head_batch().join_arrays,
             self.buffered_data.head_batch().range.start,
             &self.sort_options,
             self.null_equals_null,
-        );
+        )
     }
 
     /// Produce join and fill output buffer until reaching target batch size

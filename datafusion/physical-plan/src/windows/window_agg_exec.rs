@@ -233,7 +233,7 @@ impl ExecutionPlan for WindowAggExec {
             .iter()
             .map(|e| {
                 Ok(e.resolve_placeholders(param_values)?
-                    .unwrap_or_else(|| Arc::clone(&e)))
+                    .unwrap_or_else(|| Arc::clone(e)))
             })
             .collect::<Result<_>>()?;
         let input = self.input.execute(partition, Arc::clone(&context))?;

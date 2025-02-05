@@ -185,7 +185,7 @@ impl WindowExpr for SlidingAggregateWindowExpr {
                     partition_by: partition_by
                         .unwrap_or_else(|| self.partition_by.clone()),
                     order_by: ordery_by.unwrap_or_else(|| self.order_by.clone()),
-                    window_frame: self.window_frame.clone(),
+                    window_frame: Arc::clone(&self.window_frame),
                 }))
             } else {
                 None

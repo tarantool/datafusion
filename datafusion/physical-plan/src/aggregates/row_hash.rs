@@ -435,6 +435,7 @@ pub(crate) struct GroupedHashAggregateStream {
 
 impl GroupedHashAggregateStream {
     /// Create a new GroupedHashAggregateStream
+    #[allow(clippy::too_many_arguments)]
     pub fn new(
         input: &Arc<dyn ExecutionPlan>,
         mode: AggregateMode,
@@ -452,7 +453,7 @@ impl GroupedHashAggregateStream {
         debug!("Creating GroupedHashAggregateStream");
         let batch_size = context.session_config().batch_size();
         let input = input.execute(partition, Arc::clone(&context))?;
-        let baseline_metrics = BaselineMetrics::new(&metrics, partition);
+        let baseline_metrics = BaselineMetrics::new(metrics, partition);
 
         let timer = baseline_metrics.elapsed_compute().timer();
 
@@ -553,7 +554,7 @@ impl GroupedHashAggregateStream {
         Ok(GroupedHashAggregateStream {
             schema: agg_schema,
             input,
-            mode: mode,
+            mode,
             accumulators,
             aggregate_arguments,
             filter_expressions,

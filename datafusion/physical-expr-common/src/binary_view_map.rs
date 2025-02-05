@@ -113,7 +113,7 @@ impl ArrowBytesViewSet {
 /// This map is used by the special `COUNT DISTINCT` aggregate function to
 /// store the distinct values, and by the `GROUP BY` operator to store
 /// group values when they are a single string array.
-
+///
 pub struct ArrowBytesViewMap<V>
 where
     V: Debug + PartialEq + Eq + Clone + Copy + Default,

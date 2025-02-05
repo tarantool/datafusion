@@ -259,7 +259,7 @@ pub(crate) enum ColumnarValueRef<'a> {
     NonNullableStringViewArray(&'a StringViewArray),
 }
 
-impl<'a> ColumnarValueRef<'a> {
+impl ColumnarValueRef<'_> {
     #[inline]
     pub fn is_valid(&self, i: usize) -> bool {
         match &self {

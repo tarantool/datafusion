@@ -234,7 +234,7 @@ impl PhysicalGroupBy {
             })
             .collect::<Result<_>>()?;
         Ok(Self {
-            expr: expr,
+            expr,
             // No need to resolve placeholders at null expressions.
             null_expr: self.null_expr.clone(),
             groups: self.groups.clone(),
@@ -518,7 +518,7 @@ impl AggregateExec {
             .iter()
             .map(|e| {
                 e.resolve_placeholders(param_values)
-                    .map(|expr| expr.unwrap_or_else(|| Arc::clone(&e)))
+                    .map(|expr| expr.unwrap_or_else(|| Arc::clone(e)))
             })
             .collect::<Result<_>>()?;
 
@@ -540,7 +540,7 @@ impl AggregateExec {
         if self.group_by.expr.is_empty() {
             return Ok(StreamType::AggregateStream(AggregateStream::new(
                 &self.input,
-                self.mode.clone(),
+                self.mode,
                 Arc::clone(&self.schema),
                 aggr_expr,
                 filter_expr,
@@ -557,7 +557,7 @@ impl AggregateExec {
                 return Ok(StreamType::GroupedPriorityQueue(
                     GroupedTopKAggregateStream::new(
                         &self.input,
-                        self.mode.clone(),
+                        self.mode,
                         Arc::clone(&self.schema),
                         group_by,
                         aggr_expr,
@@ -572,7 +572,7 @@ impl AggregateExec {
         // grouping by something else and we need to just materialize all results
         Ok(StreamType::GroupedHash(GroupedHashAggregateStream::new(
             &self.input,
-            self.mode.clone(),
+            self.mode,
             Arc::clone(&self.schema),
             group_by,
             aggr_expr,

@@ -51,6 +51,7 @@ pub struct GroupedTopKAggregateStream {
 }
 
 impl GroupedTopKAggregateStream {
+    #[allow(clippy::too_many_arguments)]
     pub fn new(
         input: &Arc<dyn ExecutionPlan>,
         mode: AggregateMode,

@@ -1554,7 +1554,7 @@ mod tests {
     use rstest_reuse::*;
 
     fn div_ceil(a: usize, b: usize) -> usize {
-        (a + b - 1) / b
+        a.div_ceil(b)
     }
 
     #[template]

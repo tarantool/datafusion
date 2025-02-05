@@ -67,6 +67,7 @@ struct AggregateStreamInner {
 
 impl AggregateStream {
     /// Create a new AggregateStream
+    #[allow(clippy::too_many_arguments)]
     pub fn new(
         input: &Arc<dyn ExecutionPlan>,
         mode: AggregateMode,
@@ -98,7 +99,7 @@ impl AggregateStream {
 
         let inner = AggregateStreamInner {
             schema: Arc::clone(&schema),
-            mode: mode,
+            mode,
             input,
             baseline_metrics,
             aggregate_expressions,

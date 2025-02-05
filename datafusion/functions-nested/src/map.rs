@@ -306,7 +306,7 @@ fn get_element_type(data_type: &DataType) -> Result<&DataType> {
 /// | +-------+ |      | +-------+ |
 /// +-----------+      +-----------+
 /// ```text
-
+///
 fn make_map_array_internal<O: OffsetSizeTrait>(
     keys: ArrayRef,
     values: ArrayRef,
