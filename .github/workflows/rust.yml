@@ -42,6 +42,10 @@ jobs:
   # Check crate compiles
   linux-build-lib:
     name: cargo check
+    if: (github.event_name == 'push') ||
+        (github.event_name == 'pull_request' &&
+        github.event.pull_request.head.repo.full_name != github.repository) ||
+        (github.event_name == 'workflow_dispatch')
     runs-on: ubuntu-latest
     container:
       image: amd64/rust
@@ -133,6 +137,10 @@ jobs:
   # Run tests
   linux-test:
     name: cargo test (amd64)
+    if: (github.event_name == 'push') ||
+        (github.event_name == 'pull_request' &&
+        github.event.pull_request.head.repo.full_name != github.repository) ||
+        (github.event_name == 'workflow_dispatch')
     needs: [ linux-build-lib ]
     runs-on: ubuntu-latest
     container:
@@ -144,7 +152,7 @@ jobs:
       - name: Setup Rust toolchain
         uses: ./.github/actions/setup-builder
         with:
-          rust-version: stable        
+          rust-version: stable
       - name: Run tests (excluding doctests)
         run: cargo test --lib --tests --bins --features avro,json,backtrace
       - name: Verify Working Directory Clean
@@ -152,6 +160,10 @@ jobs:
 
   linux-test-datafusion-cli:
     name: cargo test datafusion-cli (amd64)
+    if: (github.event_name == 'push') ||
+        (github.event_name == 'pull_request' &&
+        github.event.pull_request.head.repo.full_name != github.repository) ||
+        (github.event_name == 'workflow_dispatch')
     needs: [ linux-build-lib ]
     runs-on: ubuntu-latest
     container:
@@ -173,6 +185,10 @@ jobs:
 
   linux-test-example:
     name: cargo examples (amd64)
+    if: (github.event_name == 'push') ||
+        (github.event_name == 'pull_request' &&
+        github.event.pull_request.head.repo.full_name != github.repository) ||
+        (github.event_name == 'workflow_dispatch')
     needs: [ linux-build-lib ]
     runs-on: ubuntu-latest
     container:
@@ -199,6 +215,10 @@ jobs:
   # Run `cargo test doc` (test documentation examples)
   linux-test-doc:
     name: cargo test doc (amd64)
+    if: (github.event_name == 'push') ||
+        (github.event_name == 'pull_request' &&
+        github.event.pull_request.head.repo.full_name != github.repository) ||
+        (github.event_name == 'workflow_dispatch')
     needs: [ linux-build-lib ]
     runs-on: ubuntu-latest
     container:
@@ -222,6 +242,10 @@ jobs:
   # Run `cargo doc` to ensure the rustdoc is clean
   linux-rustdoc:
     name: cargo doc
+    if: (github.event_name == 'push') ||
+        (github.event_name == 'pull_request' &&
+        github.event.pull_request.head.repo.full_name != github.repository) ||
+        (github.event_name == 'workflow_dispatch')
     needs: [ linux-build-lib ]
     runs-on: ubuntu-latest
     container:
@@ -237,6 +261,10 @@ jobs:
 
   linux-wasm-pack:
     name: build with wasm-pack
+    if: (github.event_name == 'push') ||
+        (github.event_name == 'pull_request' &&
+        github.event.pull_request.head.repo.full_name != github.repository) ||
+        (github.event_name == 'workflow_dispatch')
     runs-on: ubuntu-latest
     container:
       image: amd64/rust
@@ -255,6 +283,10 @@ jobs:
   # verify that the benchmark queries return the correct results
   verify-benchmark-results:
     name: verify benchmark results (amd64)
+    if: (github.event_name == 'push') ||
+        (github.event_name == 'pull_request' &&
+        github.event.pull_request.head.repo.full_name != github.repository) ||
+        (github.event_name == 'workflow_dispatch')
     needs: [ linux-build-lib ]
     runs-on: ubuntu-latest
     container:
@@ -286,6 +318,10 @@ jobs:
 
   sqllogictest-postgres:
     name: "Run sqllogictest with Postgres runner"
+    if: (github.event_name == 'push') ||
+        (github.event_name == 'pull_request' &&
+        github.event.pull_request.head.repo.full_name != github.repository) ||
+        (github.event_name == 'workflow_dispatch')
     needs: [ linux-build-lib ]
     runs-on: ubuntu-latest
     services:
@@ -317,6 +353,10 @@ jobs:
 
   windows:
     name: cargo test (win64)
+    if: (github.event_name == 'push') ||
+        (github.event_name == 'pull_request' &&
+        github.event.pull_request.head.repo.full_name != github.repository) ||
+        (github.event_name == 'workflow_dispatch')
     runs-on: windows-latest
     steps:
       - uses: actions/checkout@v4
@@ -334,22 +374,30 @@ jobs:
 
   macos:
     name: cargo test (macos)
+    if: (github.event_name == 'push') ||
+        (github.event_name == 'pull_request' &&
+        github.event.pull_request.head.repo.full_name != github.repository) ||
+        (github.event_name == 'workflow_dispatch')
     runs-on: macos-latest
     steps:
       - uses: actions/checkout@v4
         with:
-          submodules: true      
+          submodules: true
       - name: Setup Rust toolchain
-        uses: ./.github/actions/setup-macos-builder       
+        uses: ./.github/actions/setup-macos-builder
       - name: Run tests (excluding doctests)
         shell: bash
         run: |
           cargo test --lib --tests --bins --features avro,json,backtrace
           cd datafusion-cli
-          cargo test --lib --tests --bins --all-features  
+          cargo test --lib --tests --bins --all-features
 
   macos-aarch64:
     name: cargo test (macos-aarch64)
+    if: (github.event_name == 'push') ||
+        (github.event_name == 'pull_request' &&
+        github.event.pull_request.head.repo.full_name != github.repository) ||
+        (github.event_name == 'workflow_dispatch')
     runs-on: macos-14
     steps:
       - uses: actions/checkout@v4
@@ -366,6 +414,10 @@ jobs:
 
   test-datafusion-pyarrow:
     name: cargo test pyarrow (amd64)
+    if: (github.event_name == 'push') ||
+        (github.event_name == 'pull_request' &&
+        github.event.pull_request.head.repo.full_name != github.repository) ||
+        (github.event_name == 'workflow_dispatch')
     needs: [ linux-build-lib ]
     runs-on: ubuntu-20.04
     container:
@@ -390,6 +442,10 @@ jobs:
 
   vendor:
     name: Verify Vendored Code
+    if: (github.event_name == 'push') ||
+        (github.event_name == 'pull_request' &&
+        github.event.pull_request.head.repo.full_name != github.repository) ||
+        (github.event_name == 'workflow_dispatch')
     runs-on: ubuntu-latest
     container:
       image: amd64/rust
@@ -405,6 +461,10 @@ jobs:
 
   check-fmt:
     name: Check cargo fmt
+    if: (github.event_name == 'push') ||
+        (github.event_name == 'pull_request' &&
+        github.event.pull_request.head.repo.full_name != github.repository) ||
+        (github.event_name == 'workflow_dispatch')
     runs-on: ubuntu-latest
     container:
       image: amd64/rust
@@ -463,6 +523,10 @@ jobs:
 
   clippy:
     name: clippy
+    if: (github.event_name == 'push') ||
+        (github.event_name == 'pull_request' &&
+        github.event.pull_request.head.repo.full_name != github.repository) ||
+        (github.event_name == 'workflow_dispatch')
     needs: [ linux-build-lib ]
     runs-on: ubuntu-latest
     container:
@@ -483,6 +547,10 @@ jobs:
   # Check answers are correct when hash values collide
   hash-collisions:
     name: cargo test hash collisions (amd64)
+    if: (github.event_name == 'push') ||
+        (github.event_name == 'pull_request' &&
+        github.event.pull_request.head.repo.full_name != github.repository) ||
+        (github.event_name == 'workflow_dispatch')
     needs: [ linux-build-lib ]
     runs-on: ubuntu-latest
     container:
@@ -502,6 +570,10 @@ jobs:
 
   cargo-toml-formatting-checks:
     name: check Cargo.toml formatting
+    if: (github.event_name == 'push') ||
+        (github.event_name == 'pull_request' &&
+        github.event.pull_request.head.repo.full_name != github.repository) ||
+        (github.event_name == 'workflow_dispatch')
     needs: [ linux-build-lib ]
     runs-on: ubuntu-latest
     container:
@@ -522,6 +594,10 @@ jobs:
 
   config-docs-check:
     name: check configs.md is up-to-date
+    if: (github.event_name == 'push') ||
+        (github.event_name == 'pull_request' &&
+        github.event.pull_request.head.repo.full_name != github.repository) ||
+        (github.event_name == 'workflow_dispatch')
     needs: [ linux-build-lib ]
     runs-on: ubuntu-latest
     container:
@@ -550,6 +626,10 @@ jobs:
   # - datafusion-cli
   msrv:
     name: Verify MSRV (Min Supported Rust Version)
+    if: (github.event_name == 'push') ||
+        (github.event_name == 'pull_request' &&
+        github.event.pull_request.head.repo.full_name != github.repository) ||
+        (github.event_name == 'workflow_dispatch')
     runs-on: ubuntu-latest
     container:
       image: amd64/rust
@@ -567,19 +647,19 @@ jobs:
           # (Min Supported Rust Version) than the one specified in the
           # `rust-version` key of `Cargo.toml`.
           #
-          # To reproduce: 
-          # 1. Install the version of Rust that is failing. Example: 
+          # To reproduce:
+          # 1. Install the version of Rust that is failing. Example:
           #    rustup install 1.76.0
           # 2. Run the command that failed with that version. Example:
           #    cargo +1.76.0 check -p datafusion
-          # 
+          #
           # To resolve, either:
-          # 1. Change your code to use older Rust features, 
+          # 1. Change your code to use older Rust features,
           # 2. Revert dependency update
           # 3. Update the MSRV version in `Cargo.toml`
           #
           # Please see the DataFusion Rust Version Compatibility Policy before
-          # updating Cargo.toml. You may have to update the code instead. 
+          # updating Cargo.toml. You may have to update the code instead.
           # https://github.com/apache/datafusion/blob/main/README.md#rust-version-compatibility-policy
           cargo msrv --output-format json --log-target stdout verify
       - name: Check datafusion-substrait
