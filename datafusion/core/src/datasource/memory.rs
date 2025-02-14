@@ -367,7 +367,7 @@ impl DataSink for MemSink {
 mod tests {
 
     use super::*;
-    use crate::datasource::provider_as_source;
+    use crate::datasource::{provider_as_source, DefaultTableSource};
     use crate::physical_plan::collect;
     use crate::prelude::SessionContext;
 
@@ -617,6 +617,7 @@ mod tests {
         // Create and register the initial table with the provided schema and data
         let initial_table = Arc::new(MemTable::try_new(schema.clone(), initial_data)?);
         session_ctx.register_table("t", initial_table.clone())?;
+        let target = Arc::new(DefaultTableSource::new(initial_table.clone()));
         // Create and register the source table with the provided schema and inserted data
         let source_table = Arc::new(MemTable::try_new(schema.clone(), inserted_data)?);
         session_ctx.register_table("source", source_table.clone())?;

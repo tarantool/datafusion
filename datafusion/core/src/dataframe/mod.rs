@@ -30,7 +30,9 @@ use crate::arrow::util::pretty;
 use crate::datasource::file_format::csv::CsvFormatFactory;
 use crate::datasource::file_format::format_as_file_type;
 use crate::datasource::file_format::json::JsonFormatFactory;
-use crate::datasource::{provider_as_source, MemTable, TableProvider};
+use crate::datasource::{
+    provider_as_source, DefaultTableSource, MemTable, TableProvider,
+};
 use crate::error::Result;
 use crate::execution::context::{SessionState, TaskContext};
 use crate::execution::FunctionRegistry;
@@ -62,6 +64,7 @@ use datafusion_functions_aggregate::expr_fn::{
 
 use async_trait::async_trait;
 use datafusion_catalog::Session;
+use datafusion_sql::TableReference;
 
 /// Contains options that control how data is
 /// written out from a DataFrame

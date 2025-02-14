@@ -86,6 +86,39 @@ pub struct DmlStatement {
     /// The schema of the output relation
     pub output_schema: DFSchemaRef,
 }
+impl Eq for DmlStatement {}
+impl Hash for DmlStatement {
+    fn hash<H: Hasher>(&self, state: &mut H) {
+        self.table_name.hash(state);
+        self.target.schema().hash(state);
+        self.op.hash(state);
+        self.input.hash(state);
+        self.output_schema.hash(state);
+    }
+}
+
+impl PartialEq for DmlStatement {
+    fn eq(&self, other: &Self) -> bool {
+        self.table_name == other.table_name
+            && self.target.schema() == other.target.schema()
+            && self.op == other.op
+            && self.input == other.input
+            && self.output_schema == other.output_schema
+    }
+}
+
+impl Debug for DmlStatement {
+    fn fmt(&self, f: &mut Formatter<'_>) -> fmt::Result {
+        f.debug_struct("DmlStatement")
+            .field("table_name", &self.table_name)
+            .field("target", &"...")
+            .field("target_schema", &self.target.schema())
+            .field("op", &self.op)
+            .field("input", &self.input)
+            .field("output_schema", &self.output_schema)
+            .finish()
+    }
+}
 
 impl Debug for DmlStatement {
     fn fmt(&self, f: &mut Formatter) -> fmt::Result {

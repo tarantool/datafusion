@@ -1227,8 +1227,7 @@ impl<S: ContextProvider> SqlToRel<'_, S> {
         // Do a table lookup to verify the table exists
         let table_ref = self.object_name_to_table_reference(table_name.clone())?;
         let table_source = self.context_provider.get_table_source(table_ref.clone())?;
-        let schema = (*table_source.schema()).clone();
-        let schema = DFSchema::try_from(schema)?;
+        let schema = table_source.schema().to_dfschema_ref()?;
         let scan = LogicalPlanBuilder::scan(
             object_name_to_string(&table_name),
             Arc::clone(&table_source),
@@ -1242,7 +1241,7 @@ impl<S: ContextProvider> SqlToRel<'_, S> {
             Some(predicate_expr) => {
                 let filter_expr =
                     self.sql_to_expr(predicate_expr, &schema, &mut planner_context)?;
-                let schema = Arc::new(schema.clone());
+                let schema = Arc::new(schema);
                 let mut using_columns = HashSet::new();
                 expr_to_columns(&filter_expr, &mut using_columns)?;
                 let filter_expr = normalize_col_with_schemas_and_ambiguity_check(

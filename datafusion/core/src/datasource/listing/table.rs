@@ -1074,7 +1074,7 @@ mod tests {
     use crate::datasource::file_format::json::JsonFormat;
     #[cfg(feature = "parquet")]
     use crate::datasource::file_format::parquet::ParquetFormat;
-    use crate::datasource::{provider_as_source, MemTable};
+    use crate::datasource::{provider_as_source, DefaultTableSource, MemTable};
     use crate::execution::options::ArrowReadOptions;
     use crate::prelude::*;
     use crate::{
@@ -1904,6 +1904,8 @@ mod tests {
         session_ctx.register_table("source", source_table.clone())?;
         // Convert the source table into a provider so that it can be used in a query
         let source = provider_as_source(source_table);
+        let target = session_ctx.table_provider("t").await?;
+        let target = Arc::new(DefaultTableSource::new(target));
         // Create a table scan logical plan to read from the source table
         let scan_plan = LogicalPlanBuilder::scan("source", source, None)?
             .filter(filter_predicate)?
