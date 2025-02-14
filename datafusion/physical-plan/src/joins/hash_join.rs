@@ -63,7 +63,7 @@ use datafusion_common::{
     JoinSide, JoinType, Result,
 };
 use datafusion_execution::memory_pool::{MemoryConsumer, MemoryReservation};
-use datafusion_execution::TaskContext;
+use datafusion_execution::{PlanState, TaskContext};
 use datafusion_physical_expr::equivalence::{
     join_equivalence_properties, ProjectionMapping,
 };
@@ -306,8 +306,6 @@ pub struct HashJoinExec {
     /// The schema after join. Please be careful when using this schema,
     /// if there is a projection, the schema isn't the same as the output schema.
     join_schema: SchemaRef,
-    /// Future that consumes left input and builds the hash table
-    left_fut: OnceAsync<JoinLeftData>,
     /// Shared the `RandomState` for the hashing algorithm
     random_state: RandomState,
     /// Partitioning mode to use
@@ -323,6 +321,27 @@ pub struct HashJoinExec {
     pub null_equals_null: bool,
     /// Cache holding plan properties like equivalences, output partitioning etc.
     cache: PlanProperties,
+}
+
+/// Exec state shared across partitions per one execution.
+#[derive(Debug)]
+struct HashJoinExecState {
+    /// Future that consumes left input and builds the hash table
+    left_fut: OnceAsync<JoinLeftData>,
+}
+
+impl HashJoinExecState {
+    fn new() -> Self {
+        Self {
+            left_fut: Default::default(),
+        }
+    }
+}
+
+impl PlanState for HashJoinExecState {
+    fn as_any(&self) -> &dyn Any {
+        self
+    }
 }
 
 impl HashJoinExec {
@@ -376,7 +395,6 @@ impl HashJoinExec {
             filter,
             join_type: *join_type,
             join_schema,
-            left_fut: Default::default(),
             random_state,
             mode: partition_mode,
             projection,
@@ -689,21 +707,32 @@ impl ExecutionPlan for HashJoinExec {
         let metrics = context.get_or_register_metric_set(self);
         let join_metrics = BuildProbeJoinMetrics::new(partition, &metrics);
         let left_fut = match self.mode {
-            PartitionMode::CollectLeft => self.left_fut.once(|| {
-                let reservation =
-                    MemoryConsumer::new("HashJoinInput").register(context.memory_pool());
-                collect_left_input(
-                    None,
-                    self.random_state.clone(),
-                    Arc::clone(&self.left),
-                    on_left.clone(),
-                    Arc::clone(&context),
-                    join_metrics.clone(),
-                    reservation,
-                    need_produce_result_in_final(self.join_type),
-                    self.right().output_partitioning().partition_count(),
-                )
-            }),
+            PartitionMode::CollectLeft => {
+                let state = context.get_or_register_plan_state(self, || {
+                    Arc::new(HashJoinExecState::new())
+                });
+
+                state
+                    .as_any()
+                    .downcast_ref::<HashJoinExecState>()
+                    .unwrap()
+                    .left_fut
+                    .once(|| {
+                        let reservation = MemoryConsumer::new("HashJoinInput")
+                            .register(context.memory_pool());
+                        collect_left_input(
+                            None,
+                            self.random_state.clone(),
+                            Arc::clone(&self.left),
+                            on_left.clone(),
+                            Arc::clone(&context),
+                            join_metrics.clone(),
+                            reservation,
+                            need_produce_result_in_final(self.join_type),
+                            self.right().output_partitioning().partition_count(),
+                        )
+                    })
+            }
             PartitionMode::Partitioned => {
                 let reservation =
                     MemoryConsumer::new(format!("HashJoinInput[{partition}]"))
@@ -3427,7 +3456,6 @@ mod tests {
     /// Test for parallelised HashJoinExec with PartitionMode::CollectLeft
     #[tokio::test]
     async fn test_collect_left_multiple_partitions_join() -> Result<()> {
-        let task_ctx = Arc::new(TaskContext::default());
         let left = build_table(
             ("a1", &vec![1, 2, 3]),
             ("b1", &vec![4, 5, 7]),
@@ -3522,6 +3550,7 @@ mod tests {
         ];
 
         for (join_type, expected) in test_cases {
+            let task_ctx = Arc::new(TaskContext::default());
             let (_, batches) = join_collect_with_partition_mode(
                 Arc::clone(&left),
                 Arc::clone(&right),

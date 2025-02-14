@@ -18,6 +18,7 @@
 use std::{
     any::Any,
     collections::{HashMap, HashSet},
+    fmt::Debug,
     sync::Arc,
 };
 
@@ -60,6 +61,9 @@ pub struct TaskContext {
     /// Metrics associated with a execution plan address.
     /// std mutex is used because too concurrent access is not assumed.
     metrics: std::sync::Mutex<HashMap<usize, ExecutionPlanMetricsSet>>,
+    /// Session plans state by an execution plan address.
+    /// Resources that shared across execution partitions.
+    plan_state: std::sync::Mutex<HashMap<usize, Arc<dyn PlanState>>>,
 }
 
 impl Default for TaskContext {
@@ -79,8 +83,14 @@ impl Default for TaskContext {
             runtime,
             param_values: None,
             metrics: Default::default(),
+            plan_state: Default::default(),
         }
     }
+}
+
+/// Generic plan state.
+pub trait PlanState: Debug + Any + Send + Sync {
+    fn as_any(&self) -> &dyn Any;
 }
 
 fn plan_addr(plan: &dyn Any) -> usize {
@@ -112,6 +122,30 @@ impl TaskContext {
             runtime,
             param_values: None,
             metrics: Default::default(),
+            plan_state: Default::default(),
+        }
+    }
+
+    /// Fork a task context.
+    ///
+    /// Forked context contains the same
+    /// * session related attributes (id, udfs, etc),
+    /// * runtime environment
+    ///
+    /// But an empty metrics and plan state.
+    ///
+    pub fn fork(&self) -> Self {
+        Self {
+            task_id: self.task_id(),
+            session_id: self.session_id(),
+            session_config: self.session_config.clone(),
+            scalar_functions: self.scalar_functions.clone(),
+            aggregate_functions: self.aggregate_functions.clone(),
+            window_functions: self.window_functions.clone(),
+            runtime: Arc::clone(&self.runtime),
+            param_values: self.param_values.clone(),
+            metrics: Default::default(),
+            plan_state: Default::default(),
         }
     }
 
@@ -204,6 +238,26 @@ impl TaskContext {
             let metric_set = default_set();
             metrics.insert(addr, metric_set.clone());
             metric_set
+        }
+    }
+
+    /// Get state for specific plan or register a new state.
+    pub fn get_or_register_plan_state<F>(
+        &self,
+        plan: &dyn Any,
+        f: F,
+    ) -> Arc<dyn PlanState>
+    where
+        F: FnOnce() -> Arc<dyn PlanState>,
+    {
+        let addr = plan_addr(plan);
+        let mut plan_state = self.plan_state.lock().unwrap();
+        if let Some(state) = plan_state.get(&addr) {
+            Arc::clone(state)
+        } else {
+            let state = f();
+            plan_state.insert(addr, Arc::clone(&state));
+            state
         }
     }
 }
