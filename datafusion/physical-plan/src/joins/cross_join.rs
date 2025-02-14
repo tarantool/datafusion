@@ -38,7 +38,7 @@ use arrow_array::RecordBatchOptions;
 use datafusion_common::stats::Precision;
 use datafusion_common::{internal_err, JoinType, Result, ScalarValue};
 use datafusion_execution::memory_pool::{MemoryConsumer, MemoryReservation};
-use datafusion_execution::TaskContext;
+use datafusion_execution::{PlanState, TaskContext};
 use datafusion_physical_expr::equivalence::join_equivalence_properties;
 
 use async_trait::async_trait;
@@ -57,9 +57,28 @@ pub struct CrossJoinExec {
     pub right: Arc<dyn ExecutionPlan>,
     /// The schema once the join is applied
     schema: SchemaRef,
+    cache: PlanProperties,
+}
+
+/// Exec state shared across partitions per one execution.
+#[derive(Debug)]
+struct CrossJoinExecState {
     /// Build-side data
     left_fut: OnceAsync<JoinLeftData>,
-    cache: PlanProperties,
+}
+
+impl CrossJoinExecState {
+    fn new() -> Self {
+        Self {
+            left_fut: Default::default(),
+        }
+    }
+}
+
+impl PlanState for CrossJoinExecState {
+    fn as_any(&self) -> &dyn Any {
+        self
+    }
 }
 
 impl CrossJoinExec {
@@ -87,7 +106,6 @@ impl CrossJoinExec {
             left,
             right,
             schema,
-            left_fut: Default::default(),
             cache,
         }
     }
@@ -239,14 +257,21 @@ impl ExecutionPlan for CrossJoinExec {
         let reservation =
             MemoryConsumer::new("CrossJoinExec").register(context.memory_pool());
 
-        let left_fut = self.left_fut.once(|| {
-            load_left_input(
-                Arc::clone(&self.left),
-                Arc::clone(&context),
-                join_metrics.clone(),
-                reservation,
-            )
-        });
+        let state = context
+            .get_or_register_plan_state(self, || Arc::new(CrossJoinExecState::new()));
+        let left_fut = state
+            .as_any()
+            .downcast_ref::<CrossJoinExecState>()
+            .unwrap()
+            .left_fut
+            .once(|| {
+                load_left_input(
+                    Arc::clone(&self.left),
+                    Arc::clone(&context),
+                    join_metrics.clone(),
+                    reservation,
+                )
+            });
 
         Ok(Box::pin(CrossJoinStream {
             schema: Arc::clone(&self.schema),
