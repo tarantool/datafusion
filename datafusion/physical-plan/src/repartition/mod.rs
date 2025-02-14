@@ -47,7 +47,7 @@ use datafusion_execution::memory_pool::MemoryConsumer;
 use datafusion_execution::metrics::{
     BaselineMetrics, ExecutionPlanMetricsSet, MetricBuilder,
 };
-use datafusion_execution::{metrics, TaskContext};
+use datafusion_execution::{metrics, PlanState, TaskContext};
 use datafusion_physical_expr::{EquivalenceProperties, PhysicalExpr, PhysicalSortExpr};
 
 use futures::stream::Stream;
@@ -174,6 +174,27 @@ impl RepartitionExecState {
 /// Uses a parking_lot `Mutex` to control other accesses as they are very short duration
 ///  (e.g. removing channels on completion) where the overhead of `await` is not warranted.
 type LazyState = Arc<tokio::sync::OnceCell<Mutex<RepartitionExecState>>>;
+
+/// State to store inside context.
+#[derive(Debug)]
+struct RepartitionExecPlanState {
+    /// Inner state that is initialized when the first output stream is created.
+    state: LazyState,
+}
+
+impl RepartitionExecPlanState {
+    fn new() -> Self {
+        Self {
+            state: Default::default(),
+        }
+    }
+}
+
+impl PlanState for RepartitionExecPlanState {
+    fn as_any(&self) -> &dyn Any {
+        self
+    }
+}
 
 /// A utility that can be used to partition batches based on [`Partitioning`]
 pub struct BatchPartitioner {
@@ -406,8 +427,6 @@ pub struct RepartitionExec {
     input: Arc<dyn ExecutionPlan>,
     /// Partitioning scheme to use
     partitioning: Partitioning,
-    /// Inner state that is initialized when the first output stream is created.
-    state: LazyState,
     /// Boolean flag to decide whether to preserve ordering. If true means
     /// `SortPreservingRepartitionExec`, false means `RepartitionExec`.
     preserve_order: bool,
@@ -566,7 +585,16 @@ impl ExecutionPlan for RepartitionExec {
         );
 
         let metrics = context.get_or_register_metric_set(self);
-        let lazy_state = Arc::clone(&self.state);
+        let state = context.get_or_register_plan_state(self, || {
+            Arc::new(RepartitionExecPlanState::new())
+        });
+        let lazy_state = Arc::clone(
+            &state
+                .as_any()
+                .downcast_ref::<RepartitionExecPlanState>()
+                .unwrap()
+                .state,
+        );
         let input = Arc::clone(&self.input);
         let partitioning = self.partitioning.clone();
         let preserve_order = self.preserve_order;
@@ -686,7 +714,6 @@ impl RepartitionExec {
         Ok(RepartitionExec {
             input,
             partitioning,
-            state: Default::default(),
             preserve_order,
             cache,
         })

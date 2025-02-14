@@ -47,7 +47,7 @@ use arrow::util::bit_util;
 use arrow_array::PrimitiveArray;
 use datafusion_common::{exec_datafusion_err, JoinSide, Result, Statistics};
 use datafusion_execution::memory_pool::{MemoryConsumer, MemoryReservation};
-use datafusion_execution::TaskContext;
+use datafusion_execution::{PlanState, TaskContext};
 use datafusion_expr::JoinType;
 use datafusion_physical_expr::equivalence::join_equivalence_properties;
 
@@ -147,12 +147,31 @@ pub struct NestedLoopJoinExec {
     pub(crate) join_type: JoinType,
     /// The schema once the join is applied
     schema: SchemaRef,
-    /// Build-side data
-    inner_table: OnceAsync<JoinLeftData>,
     /// Information of index and left / right placement of columns
     column_indices: Vec<ColumnIndex>,
     /// Cache holding plan properties like equivalences, output partitioning etc.
     cache: PlanProperties,
+}
+
+/// Exec state shared across partitions per one execution.
+#[derive(Debug)]
+struct NestedLoopJoinExecState {
+    /// Build-side data.
+    inner_table: OnceAsync<JoinLeftData>,
+}
+
+impl NestedLoopJoinExecState {
+    fn new() -> Self {
+        Self {
+            inner_table: Default::default(),
+        }
+    }
+}
+
+impl PlanState for NestedLoopJoinExecState {
+    fn as_any(&self) -> &dyn Any {
+        self
+    }
 }
 
 impl NestedLoopJoinExec {
@@ -178,7 +197,6 @@ impl NestedLoopJoinExec {
             filter,
             join_type: *join_type,
             schema,
-            inner_table: Default::default(),
             column_indices,
             cache,
         })
@@ -303,16 +321,25 @@ impl ExecutionPlan for NestedLoopJoinExec {
             MemoryConsumer::new(format!("NestedLoopJoinLoad[{partition}]"))
                 .register(context.memory_pool());
 
-        let inner_table = self.inner_table.once(|| {
-            collect_left_input(
-                Arc::clone(&self.left),
-                Arc::clone(&context),
-                join_metrics.clone(),
-                load_reservation,
-                need_produce_result_in_final(self.join_type),
-                self.right().output_partitioning().partition_count(),
-            )
+        let state = context.get_or_register_plan_state(self, || {
+            Arc::new(NestedLoopJoinExecState::new())
         });
+
+        let inner_table = state
+            .as_any()
+            .downcast_ref::<NestedLoopJoinExecState>()
+            .unwrap()
+            .inner_table
+            .once(|| {
+                collect_left_input(
+                    Arc::clone(&self.left),
+                    Arc::clone(&context),
+                    join_metrics.clone(),
+                    load_reservation,
+                    need_produce_result_in_final(self.join_type),
+                    self.right().output_partitioning().partition_count(),
+                )
+            });
 
         // Resolve placeholders in filter.
         let resolved_filter = if let Some(ref filter) = self.filter {

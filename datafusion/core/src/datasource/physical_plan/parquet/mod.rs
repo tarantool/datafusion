@@ -709,7 +709,6 @@ impl ExecutionPlan for ParquetExec {
             .clone()
             .unwrap_or_else(|| Arc::new(DefaultSchemaAdapterFactory::default()));
 
-        println!("parquet exec registered metrics...");
         let metrics = ctx.get_or_register_metric_set_with_default(self, || {
             ExecutionPlanMetricsSet::with_inner(self.base_metrics.clone_inner())
         });

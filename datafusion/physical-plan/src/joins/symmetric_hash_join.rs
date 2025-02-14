@@ -1642,6 +1642,7 @@ mod tests {
             Arc::clone(&task_ctx),
         )
         .await?;
+        let task_ctx = Arc::new(task_ctx.fork());
         let second_batches = partitioned_hash_join_with_filter(
             left, right, on, filter, &join_type, false, task_ctx,
         )
