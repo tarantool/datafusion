@@ -1183,7 +1183,7 @@ mod tests {
     };
     use datafusion_execution::config::SessionConfig;
     use datafusion_execution::{
-        RecordBatchStream, SendableRecordBatchStream, TaskContext,
+        RecordBatchStream, SendableRecordBatchStream, TaskContext, TaskContextBuilder,
     };
     use datafusion_expr::{
         WindowFrame, WindowFrameBound, WindowFrameUnits, WindowFunctionDefinition,
@@ -1347,13 +1347,15 @@ mod tests {
     }
 
     fn task_context_helper() -> TaskContext {
-        let task_ctx = TaskContext::default();
+        let task_ctx_builder = TaskContextBuilder::new();
         // Create session context with config
         let session_config = SessionConfig::new()
             .with_batch_size(1)
             .with_target_partitions(2)
             .with_round_robin_repartition(false);
-        task_ctx.with_session_config(session_config)
+        task_ctx_builder
+            .with_session_config(Some(session_config))
+            .build()
     }
 
     fn task_context() -> Arc<TaskContext> {
@@ -1516,7 +1518,11 @@ mod tests {
     #[tokio::test]
     async fn test_window_nth_value_bounded_memoize() -> Result<()> {
         let config = SessionConfig::new().with_target_partitions(1);
-        let task_ctx = Arc::new(TaskContext::default().with_session_config(config));
+        let task_ctx = Arc::new(
+            TaskContextBuilder::new()
+                .with_session_config(Some(config))
+                .build(),
+        );
 
         let schema = Arc::new(Schema::new(vec![Field::new("a", DataType::Int32, false)]));
         // Create a new batch of data to insert into the table

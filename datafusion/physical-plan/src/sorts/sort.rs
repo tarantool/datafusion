@@ -1005,7 +1005,7 @@ mod tests {
     use datafusion_common::{assert_batches_eq, ParamValues, Result, ScalarValue};
     use datafusion_execution::config::SessionConfig;
     use datafusion_execution::runtime_env::RuntimeEnvBuilder;
-    use datafusion_execution::RecordBatchStream;
+    use datafusion_execution::{RecordBatchStream, TaskContextBuilder};
     use datafusion_expr::Operator;
     use datafusion_physical_expr::expressions::{binary, placeholder, Column, Literal};
     use datafusion_physical_expr::EquivalenceProperties;
@@ -1163,9 +1163,10 @@ mod tests {
             .with_memory_limit(sort_spill_reservation_bytes + 12288, 1.0)
             .build_arc()?;
         let task_ctx = Arc::new(
-            TaskContext::default()
-                .with_session_config(session_config)
-                .with_runtime(runtime),
+            TaskContextBuilder::new()
+                .with_session_config(Some(session_config))
+                .with_runtime(Some(runtime))
+                .build(),
         );
 
         let partitions = 100;
@@ -1242,9 +1243,10 @@ mod tests {
                 )
                 .build_arc()?;
             let task_ctx = Arc::new(
-                TaskContext::default()
-                    .with_runtime(runtime)
-                    .with_session_config(session_config),
+                TaskContextBuilder::new()
+                    .with_session_config(Some(session_config))
+                    .with_runtime(Some(runtime))
+                    .build(),
             );
 
             let csv = test::scan_partitioned(partitions);

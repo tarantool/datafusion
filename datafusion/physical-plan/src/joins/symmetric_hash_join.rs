@@ -1577,6 +1577,7 @@ mod tests {
     use arrow::datatypes::{DataType, Field, IntervalUnit, TimeUnit};
     use datafusion_common::ScalarValue;
     use datafusion_execution::config::SessionConfig;
+    use datafusion_execution::TaskContextBuilder;
     use datafusion_expr::Operator;
     use datafusion_physical_expr::expressions::{binary, col, lit, Column};
 
@@ -1962,7 +1963,9 @@ mod tests {
         let join_type = JoinType::Full;
         let case_expr = 1;
         let session_config = SessionConfig::new().with_repartition_joins(false);
-        let task_ctx = TaskContext::default().with_session_config(session_config);
+        let task_ctx = TaskContextBuilder::new()
+            .with_session_config(Some(session_config))
+            .build();
         let task_ctx = Arc::new(task_ctx);
         let (left_partition, right_partition) = get_or_create_table((10, 11), 8)?;
         let left_schema = &left_partition[0].schema();
@@ -2022,7 +2025,9 @@ mod tests {
         let join_type = JoinType::Full;
         let case_expr = 1;
         let session_config = SessionConfig::new().with_repartition_joins(false);
-        let task_ctx = TaskContext::default().with_session_config(session_config);
+        let task_ctx = TaskContextBuilder::new()
+            .with_session_config(Some(session_config))
+            .build();
         let task_ctx = Arc::new(task_ctx);
         let (left_partition, right_partition) = get_or_create_table((10, 11), 8)?;
 
@@ -2085,7 +2090,9 @@ mod tests {
         let cardinality = (10, 11);
         let case_expr = 1;
         let session_config = SessionConfig::new().with_repartition_joins(false);
-        let task_ctx = TaskContext::default().with_session_config(session_config);
+        let task_ctx = TaskContextBuilder::new()
+            .with_session_config(Some(session_config))
+            .build();
         let task_ctx = Arc::new(task_ctx);
         let (left_partition, right_partition) = get_or_create_table(cardinality, 8)?;
 
@@ -2149,7 +2156,9 @@ mod tests {
 
         // a + b > c + 10 AND a + b < c + 100
         let session_config = SessionConfig::new().with_repartition_joins(false);
-        let task_ctx = TaskContext::default().with_session_config(session_config);
+        let task_ctx = TaskContextBuilder::new()
+            .with_session_config(Some(session_config))
+            .build();
         let task_ctx = Arc::new(task_ctx);
         let (left_partition, right_partition) = get_or_create_table(cardinality, 8)?;
 
@@ -2211,7 +2220,11 @@ mod tests {
         let config = SessionConfig::new().with_repartition_joins(false);
         // let session_ctx = SessionContext::with_config(config);
         // let task_ctx = session_ctx.task_ctx();
-        let task_ctx = Arc::new(TaskContext::default().with_session_config(config));
+        let task_ctx = Arc::new(
+            TaskContextBuilder::new()
+                .with_session_config(Some(config))
+                .build(),
+        );
         let (left_partition, right_partition) = get_or_create_table(cardinality, 8)?;
         let left_schema = &left_partition[0].schema();
         let right_schema = &right_partition[0].schema();
@@ -2291,7 +2304,9 @@ mod tests {
         #[values(0, 1, 2)] case_expr: usize,
     ) -> Result<()> {
         let session_config = SessionConfig::new().with_repartition_joins(false);
-        let task_ctx = TaskContext::default().with_session_config(session_config);
+        let task_ctx = TaskContextBuilder::new()
+            .with_session_config(Some(session_config))
+            .build();
         let task_ctx = Arc::new(task_ctx);
         let (left_partition, right_partition) = get_or_create_table(cardinality, 8)?;
 
@@ -2375,7 +2390,9 @@ mod tests {
         cardinality: (i32, i32),
     ) -> Result<()> {
         let session_config = SessionConfig::new().with_repartition_joins(false);
-        let task_ctx = TaskContext::default().with_session_config(session_config);
+        let task_ctx = TaskContextBuilder::new()
+            .with_session_config(Some(session_config))
+            .build();
         let task_ctx = Arc::new(task_ctx);
         let (left_partition, right_partition) = get_or_create_table(cardinality, 8)?;
 
@@ -2453,7 +2470,9 @@ mod tests {
         #[values(0, 1, 2, 3, 4, 5)] case_expr: usize,
     ) -> Result<()> {
         let session_config = SessionConfig::new().with_repartition_joins(false);
-        let task_ctx = TaskContext::default().with_session_config(session_config);
+        let task_ctx = TaskContextBuilder::new()
+            .with_session_config(Some(session_config))
+            .build();
         let task_ctx = Arc::new(task_ctx);
         let (left_partition, right_partition) = get_or_create_table(cardinality, 8)?;
 

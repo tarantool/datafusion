@@ -333,7 +333,7 @@ mod tests {
     use datafusion_common_runtime::SpawnedTask;
     use datafusion_execution::config::SessionConfig;
     use datafusion_execution::metrics::{MetricValue, Timestamp};
-    use datafusion_execution::RecordBatchStream;
+    use datafusion_execution::{RecordBatchStream, TaskContextBuilder};
     use datafusion_physical_expr::expressions::Column;
     use datafusion_physical_expr::EquivalenceProperties;
     use datafusion_physical_expr_common::physical_expr::PhysicalExpr;
@@ -745,8 +745,9 @@ mod tests {
         let basic = basic_sort(Arc::clone(&input), sort.clone(), task_ctx).await;
 
         // batch size of 23
-        let task_ctx = TaskContext::default()
-            .with_session_config(SessionConfig::new().with_batch_size(23));
+        let task_ctx = TaskContextBuilder::new()
+            .with_session_config(Some(SessionConfig::new().with_batch_size(23)))
+            .build();
         let task_ctx = Arc::new(task_ctx);
 
         let merge = Arc::new(SortPreservingMergeExec::new(sort, input));

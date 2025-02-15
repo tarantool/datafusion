@@ -15,33 +15,20 @@
 // specific language governing permissions and limitations
 // under the License.
 
-use std::{
-    any::Any,
-    collections::{HashMap, HashSet},
-    fmt::Debug,
-    sync::Arc,
-};
+use std::{any::Any, collections::HashMap, fmt::Debug, sync::Arc};
 
 use crate::{
     config::SessionConfig,
     memory_pool::MemoryPool,
     metrics::{ExecutionPlanMetricsSet, MetricsSet},
-    registry::FunctionRegistry,
     runtime_env::{RuntimeEnv, RuntimeEnvBuilder},
 };
-use datafusion_common::{plan_datafusion_err, DataFusionError, ParamValues, Result};
-use datafusion_expr::planner::ExprPlanner;
+use datafusion_common::ParamValues;
 use datafusion_expr::{AggregateUDF, ScalarUDF, WindowUDF};
 
-/// Task Execution Context
-///
-/// A [`TaskContext`] contains the state required during a single query's
-/// execution. Please see the documentation on [`SessionContext`] for more
-/// information.
-///
-/// [`SessionContext`]: https://docs.rs/datafusion/latest/datafusion/execution/context/struct.SessionContext.html
+/// [`TaskContext`] shared state across forks.
 #[derive(Debug)]
-pub struct TaskContext {
+pub struct TaskContextSharedState {
     /// Session Id
     session_id: String,
     /// Optional Task Identify
@@ -49,30 +36,24 @@ pub struct TaskContext {
     /// Session configuration
     session_config: SessionConfig,
     /// Scalar functions associated with this task context
+    #[allow(dead_code)]
     scalar_functions: HashMap<String, Arc<ScalarUDF>>,
     /// Aggregate functions associated with this task context
+    #[allow(dead_code)]
     aggregate_functions: HashMap<String, Arc<AggregateUDF>>,
     /// Window functions associated with this task context
+    #[allow(dead_code)]
     window_functions: HashMap<String, Arc<WindowUDF>>,
     /// Runtime environment associated with this task context
     runtime: Arc<RuntimeEnv>,
-    /// Param values for physical placeholders.
-    param_values: Option<ParamValues>,
-    /// Metrics associated with a execution plan address.
-    /// std mutex is used because too concurrent access is not assumed.
-    metrics: std::sync::Mutex<HashMap<usize, ExecutionPlanMetricsSet>>,
-    /// Session plans state by an execution plan address.
-    /// Resources that shared across execution partitions.
-    plan_state: std::sync::Mutex<HashMap<usize, Arc<dyn PlanState>>>,
 }
 
-impl Default for TaskContext {
+impl Default for TaskContextSharedState {
     fn default() -> Self {
         let runtime = RuntimeEnvBuilder::new()
             .build_arc()
             .expect("default runtime created successfully");
-
-        // Create a default task context, mostly useful for testing
+        // Create a default task context shared state, mostly useful for testing.
         Self {
             session_id: "DEFAULT".to_string(),
             task_id: None,
@@ -81,11 +62,29 @@ impl Default for TaskContext {
             aggregate_functions: HashMap::new(),
             window_functions: HashMap::new(),
             runtime,
-            param_values: None,
-            metrics: Default::default(),
-            plan_state: Default::default(),
         }
     }
+}
+
+/// Task Execution Context
+///
+/// A [`TaskContext`] contains the state required during a single query's
+/// execution. Please see the documentation on [`SessionContext`] for more
+/// information.
+///
+/// [`SessionContext`]: https://docs.rs/datafusion/latest/datafusion/execution/context/struct.SessionContext.html
+#[derive(Debug, Default)]
+pub struct TaskContext {
+    /// State shared between forks.
+    shared_state: Arc<TaskContextSharedState>,
+    /// Param values for physical placeholders.
+    param_values: Option<ParamValues>,
+    /// Metrics associated with a execution plan address.
+    /// std mutex is used because too concurrent access is not assumed.
+    metrics: std::sync::Mutex<HashMap<usize, ExecutionPlanMetricsSet>>,
+    /// Session plans state by an execution plan address.
+    /// Resources that shared across execution partitions.
+    plan_state: std::sync::Mutex<HashMap<usize, Arc<dyn PlanState>>>,
 }
 
 /// Generic plan state.
@@ -113,14 +112,16 @@ impl TaskContext {
         runtime: Arc<RuntimeEnv>,
     ) -> Self {
         Self {
-            task_id,
-            session_id,
-            session_config,
-            scalar_functions,
-            aggregate_functions,
-            window_functions,
-            runtime,
-            param_values: None,
+            shared_state: Arc::new(TaskContextSharedState {
+                task_id,
+                session_id,
+                session_config,
+                scalar_functions,
+                aggregate_functions,
+                window_functions,
+                runtime,
+            }),
+            param_values: Default::default(),
             metrics: Default::default(),
             plan_state: Default::default(),
         }
@@ -128,22 +129,19 @@ impl TaskContext {
 
     /// Fork a task context.
     ///
-    /// Forked context contains the same
+    /// Forked context contains the same:
     /// * session related attributes (id, udfs, etc),
     /// * runtime environment
     ///
-    /// But an empty metrics and plan state.
+    /// But an empty:
+    /// * params
+    /// * metrics
+    /// * plan state
     ///
     pub fn fork(&self) -> Self {
         Self {
-            task_id: self.task_id(),
-            session_id: self.session_id(),
-            session_config: self.session_config.clone(),
-            scalar_functions: self.scalar_functions.clone(),
-            aggregate_functions: self.aggregate_functions.clone(),
-            window_functions: self.window_functions.clone(),
-            runtime: Arc::clone(&self.runtime),
-            param_values: self.param_values.clone(),
+            shared_state: Arc::clone(&self.shared_state),
+            param_values: Default::default(),
             metrics: Default::default(),
             plan_state: Default::default(),
         }
@@ -151,27 +149,27 @@ impl TaskContext {
 
     /// Return the SessionConfig associated with this [TaskContext]
     pub fn session_config(&self) -> &SessionConfig {
-        &self.session_config
+        &self.shared_state.session_config
     }
 
     /// Return the `session_id` of this [TaskContext]
     pub fn session_id(&self) -> String {
-        self.session_id.clone()
+        self.shared_state.session_id.clone()
     }
 
     /// Return the `task_id` of this [TaskContext]
     pub fn task_id(&self) -> Option<String> {
-        self.task_id.clone()
+        self.shared_state.task_id.clone()
     }
 
     /// Return the [`MemoryPool`] associated with this [TaskContext]
     pub fn memory_pool(&self) -> &Arc<dyn MemoryPool> {
-        &self.runtime.memory_pool
+        &self.shared_state.runtime.memory_pool
     }
 
     /// Return the [RuntimeEnv] associated with this [TaskContext]
     pub fn runtime_env(&self) -> Arc<RuntimeEnv> {
-        Arc::clone(&self.runtime)
+        Arc::clone(&self.shared_state.runtime)
     }
 
     /// Return param values associated with thix [`TaskContext`].
@@ -182,18 +180,6 @@ impl TaskContext {
     /// Update the param values.
     pub fn with_param_values(mut self, param_values: ParamValues) -> Self {
         self.param_values = Some(param_values);
-        self
-    }
-
-    /// Update the [`SessionConfig`]
-    pub fn with_session_config(mut self, session_config: SessionConfig) -> Self {
-        self.session_config = session_config;
-        self
-    }
-
-    /// Update the [`RuntimeEnv`]
-    pub fn with_runtime(mut self, runtime: Arc<RuntimeEnv>) -> Self {
-        self.runtime = runtime;
         self
     }
 
@@ -262,63 +248,136 @@ impl TaskContext {
     }
 }
 
-impl FunctionRegistry for TaskContext {
-    fn udfs(&self) -> HashSet<String> {
-        self.scalar_functions.keys().cloned().collect()
+/// Helps to build a [`TaskContext`].
+#[derive(Default)]
+pub struct TaskContextBuilder {
+    session_id: Option<String>,
+    task_id: Option<String>,
+    session_config: Option<SessionConfig>,
+    scalar_functions: HashMap<String, Arc<ScalarUDF>>,
+    aggregate_functions: HashMap<String, Arc<AggregateUDF>>,
+    window_functions: HashMap<String, Arc<WindowUDF>>,
+    runtime: Option<Arc<RuntimeEnv>>,
+    param_values: Option<ParamValues>,
+    metrics: HashMap<usize, ExecutionPlanMetricsSet>,
+    plan_state: HashMap<usize, Arc<dyn PlanState>>,
+}
+
+impl TaskContextBuilder {
+    /// Make a new [`TaskContextBuilder`].
+    pub fn new() -> Self {
+        Self::default()
     }
 
-    fn udf(&self, name: &str) -> Result<Arc<ScalarUDF>> {
-        let result = self.scalar_functions.get(name);
-
-        result.cloned().ok_or_else(|| {
-            plan_datafusion_err!("There is no UDF named \"{name}\" in the TaskContext")
-        })
+    /// Set a session id.
+    pub fn with_session_id(mut self, session_id: Option<String>) -> Self {
+        self.session_id = session_id;
+        self
     }
 
-    fn udaf(&self, name: &str) -> Result<Arc<AggregateUDF>> {
-        let result = self.aggregate_functions.get(name);
-
-        result.cloned().ok_or_else(|| {
-            plan_datafusion_err!("There is no UDAF named \"{name}\" in the TaskContext")
-        })
+    /// Set a task id.
+    pub fn with_task_id(mut self, task_id: Option<String>) -> Self {
+        self.task_id = task_id;
+        self
     }
 
-    fn udwf(&self, name: &str) -> Result<Arc<WindowUDF>> {
-        let result = self.window_functions.get(name);
-
-        result.cloned().ok_or_else(|| {
-            DataFusionError::Internal(format!(
-                "There is no UDWF named \"{name}\" in the TaskContext"
-            ))
-        })
-    }
-    fn register_udaf(
-        &mut self,
-        udaf: Arc<AggregateUDF>,
-    ) -> Result<Option<Arc<AggregateUDF>>> {
-        udaf.aliases().iter().for_each(|alias| {
-            self.aggregate_functions
-                .insert(alias.clone(), Arc::clone(&udaf));
-        });
-        Ok(self.aggregate_functions.insert(udaf.name().into(), udaf))
-    }
-    fn register_udwf(&mut self, udwf: Arc<WindowUDF>) -> Result<Option<Arc<WindowUDF>>> {
-        udwf.aliases().iter().for_each(|alias| {
-            self.window_functions
-                .insert(alias.clone(), Arc::clone(&udwf));
-        });
-        Ok(self.window_functions.insert(udwf.name().into(), udwf))
-    }
-    fn register_udf(&mut self, udf: Arc<ScalarUDF>) -> Result<Option<Arc<ScalarUDF>>> {
-        udf.aliases().iter().for_each(|alias| {
-            self.scalar_functions
-                .insert(alias.clone(), Arc::clone(&udf));
-        });
-        Ok(self.scalar_functions.insert(udf.name().into(), udf))
+    pub fn with_session_config(mut self, session_config: Option<SessionConfig>) -> Self {
+        self.session_config = session_config;
+        self
     }
 
-    fn expr_planners(&self) -> Vec<Arc<dyn ExprPlanner>> {
-        vec![]
+    /// Set scalar functions.
+    pub fn with_scalar_functions(
+        mut self,
+        scalar_functions: HashMap<String, Arc<ScalarUDF>>,
+    ) -> Self {
+        self.scalar_functions = scalar_functions;
+        self
+    }
+
+    /// Set aggregate functions.
+    pub fn with_aggregate_functions(
+        mut self,
+        aggregate_funtions: HashMap<String, Arc<AggregateUDF>>,
+    ) -> Self {
+        self.aggregate_functions = aggregate_funtions;
+        self
+    }
+
+    /// Set window functions.
+    pub fn with_window_functions(
+        mut self,
+        window_functions: HashMap<String, Arc<WindowUDF>>,
+    ) -> Self {
+        self.window_functions = window_functions;
+        self
+    }
+
+    /// Set a runtime.
+    pub fn with_runtime(mut self, runtime: Option<Arc<RuntimeEnv>>) -> Self {
+        self.runtime = runtime;
+        self
+    }
+
+    /// Set param values.
+    pub fn with_param_values(mut self, param_values: Option<ParamValues>) -> Self {
+        self.param_values = param_values;
+        self
+    }
+
+    /// Set metrics.
+    pub fn with_metrics(
+        mut self,
+        metrics: HashMap<usize, ExecutionPlanMetricsSet>,
+    ) -> Self {
+        self.metrics = metrics;
+        self
+    }
+
+    /// Set a plan state.
+    pub fn with_plan_state(
+        mut self,
+        plan_state: HashMap<usize, Arc<dyn PlanState>>,
+    ) -> Self {
+        self.plan_state = plan_state;
+        self
+    }
+
+    /// Build a task context.
+    pub fn build(self) -> TaskContext {
+        let Self {
+            task_id,
+            session_id,
+            session_config,
+            scalar_functions,
+            aggregate_functions,
+            window_functions,
+            runtime,
+            param_values,
+            metrics,
+            plan_state,
+        } = self;
+
+        let shared_state = TaskContextSharedState {
+            session_id: session_id.unwrap_or("DEFAULT".to_string()),
+            task_id,
+            session_config: session_config.unwrap_or(SessionConfig::new()),
+            scalar_functions,
+            aggregate_functions,
+            window_functions,
+            runtime: runtime.unwrap_or_else(|| {
+                RuntimeEnvBuilder::new()
+                    .build_arc()
+                    .expect("default runtime created successfully")
+            }),
+        };
+
+        TaskContext {
+            shared_state: Arc::new(shared_state),
+            param_values,
+            metrics: std::sync::Mutex::new(metrics),
+            plan_state: std::sync::Mutex::new(plan_state),
+        }
     }
 }
 
@@ -327,7 +386,7 @@ mod tests {
     use super::*;
     use datafusion_common::{
         config::{ConfigExtension, ConfigOptions, Extensions},
-        extensions_options,
+        extensions_options, Result,
     };
 
     extensions_options! {

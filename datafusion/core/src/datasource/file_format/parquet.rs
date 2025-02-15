@@ -1285,6 +1285,7 @@ mod tests {
     use datafusion_execution::metrics::MetricValue;
     use datafusion_execution::object_store::ObjectStoreUrl;
     use datafusion_execution::runtime_env::RuntimeEnv;
+    use datafusion_execution::TaskContextBuilder;
     use datafusion_physical_plan::stream::RecordBatchStreamAdapter;
     use futures::stream::BoxStream;
     use log::error;
@@ -2233,9 +2234,10 @@ mod tests {
             .register_store(store_url, local);
 
         Arc::new(
-            TaskContext::default()
-                .with_session_config(session)
-                .with_runtime(Arc::new(runtime)),
+            TaskContextBuilder::new()
+                .with_session_config(Some(session))
+                .with_runtime(Some(Arc::new(runtime)))
+                .build(),
         )
     }
 

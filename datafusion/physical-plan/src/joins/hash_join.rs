@@ -1572,6 +1572,7 @@ mod tests {
     };
     use datafusion_execution::config::SessionConfig;
     use datafusion_execution::runtime_env::RuntimeEnvBuilder;
+    use datafusion_execution::TaskContextBuilder;
     use datafusion_expr::Operator;
     use datafusion_physical_expr::expressions::{
         binary, col, placeholder, BinaryExpr, Literal,
@@ -1592,7 +1593,11 @@ mod tests {
 
     fn prepare_task_ctx(batch_size: usize) -> Arc<TaskContext> {
         let session_config = SessionConfig::default().with_batch_size(batch_size);
-        Arc::new(TaskContext::default().with_session_config(session_config))
+        Arc::new(
+            TaskContextBuilder::new()
+                .with_session_config(Some(session_config))
+                .build(),
+        )
     }
 
     fn build_table(
@@ -3839,7 +3844,9 @@ mod tests {
             let runtime = RuntimeEnvBuilder::new()
                 .with_memory_limit(100, 1.0)
                 .build_arc()?;
-            let task_ctx = TaskContext::default().with_runtime(runtime);
+            let task_ctx = TaskContextBuilder::new()
+                .with_runtime(Some(runtime))
+                .build();
             let task_ctx = Arc::new(task_ctx);
 
             let join = join(
@@ -3914,9 +3921,10 @@ mod tests {
                 .with_memory_limit(100, 1.0)
                 .build_arc()?;
             let session_config = SessionConfig::default().with_batch_size(50);
-            let task_ctx = TaskContext::default()
-                .with_session_config(session_config)
-                .with_runtime(runtime);
+            let task_ctx = TaskContextBuilder::new()
+                .with_session_config(Some(session_config))
+                .with_runtime(Some(runtime))
+                .build();
             let task_ctx = Arc::new(task_ctx);
 
             let join = HashJoinExec::try_new(

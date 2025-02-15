@@ -243,10 +243,10 @@ pub trait SqlPlannerExtension<T: ContextProvider>: Send + Sync {
     /// If this methods returns `Some` then a resulting plan is returned,
     /// otherwise planner will apply the own analysis.
     ///
-    fn statement_to_plan<'a>(
+    fn statement_to_plan(
         &self,
         statement: &Statement,
-        planner: &SqlToRel<'a, T>,
+        planner: &SqlToRel<'_, T>,
     ) -> Result<Option<LogicalPlan>>;
 }
 
@@ -254,10 +254,10 @@ pub trait SqlPlannerExtension<T: ContextProvider>: Send + Sync {
 pub struct DefaultSqlPlannerExtension;
 
 impl<T: ContextProvider> SqlPlannerExtension<T> for DefaultSqlPlannerExtension {
-    fn statement_to_plan<'a>(
+    fn statement_to_plan(
         &self,
         _statement: &Statement,
-        _planner: &SqlToRel<'a, T>,
+        _planner: &SqlToRel<'_, T>,
     ) -> Result<Option<LogicalPlan>> {
         Ok(None)
     }

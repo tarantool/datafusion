@@ -1985,7 +1985,7 @@ mod tests {
     use datafusion_execution::config::SessionConfig;
     use datafusion_execution::disk_manager::DiskManagerConfig;
     use datafusion_execution::runtime_env::RuntimeEnvBuilder;
-    use datafusion_execution::TaskContext;
+    use datafusion_execution::{TaskContext, TaskContextBuilder};
 
     use crate::expressions::Column;
     use crate::joins::sort_merge_join::get_filtered_join_mask;
@@ -2152,8 +2152,9 @@ mod tests {
         on: JoinOn,
         join_type: JoinType,
     ) -> Result<(Vec<String>, Vec<RecordBatch>)> {
-        let task_ctx = TaskContext::default()
-            .with_session_config(SessionConfig::new().with_batch_size(2));
+        let task_ctx = TaskContextBuilder::new()
+            .with_session_config(Some(SessionConfig::new().with_batch_size(2)))
+            .build();
         let task_ctx = Arc::new(task_ctx);
         let join = join(left, right, on, join_type)?;
         let columns = columns(&join.schema());
@@ -2913,9 +2914,10 @@ mod tests {
         let session_config = SessionConfig::default().with_batch_size(50);
 
         for join_type in join_types {
-            let task_ctx = TaskContext::default()
-                .with_session_config(session_config.clone())
-                .with_runtime(Arc::clone(&runtime));
+            let task_ctx = TaskContextBuilder::new()
+                .with_session_config(Some(session_config.clone()))
+                .with_runtime(Some(Arc::clone(&runtime)))
+                .build();
             let task_ctx = Arc::new(task_ctx);
 
             let join = join_with_options(
@@ -2999,9 +3001,10 @@ mod tests {
         let session_config = SessionConfig::default().with_batch_size(50);
 
         for join_type in join_types {
-            let task_ctx = TaskContext::default()
-                .with_session_config(session_config.clone())
-                .with_runtime(Arc::clone(&runtime));
+            let task_ctx = TaskContextBuilder::new()
+                .with_session_config(Some(session_config.clone()))
+                .with_runtime(Some(Arc::clone(&runtime)))
+                .build();
             let task_ctx = Arc::new(task_ctx);
             let join = join_with_options(
                 Arc::clone(&left),
@@ -3065,9 +3068,10 @@ mod tests {
             let session_config = SessionConfig::default().with_batch_size(batch_size);
 
             for join_type in &join_types {
-                let task_ctx = TaskContext::default()
-                    .with_session_config(session_config.clone())
-                    .with_runtime(Arc::clone(&runtime));
+                let task_ctx = TaskContextBuilder::new()
+                    .with_session_config(Some(session_config.clone()))
+                    .with_runtime(Some(Arc::clone(&runtime)))
+                    .build();
                 let task_ctx = Arc::new(task_ctx);
 
                 let join = join_with_options(
@@ -3088,8 +3092,9 @@ mod tests {
                 assert!(metrics.spilled_rows().unwrap() > 0);
 
                 // Run the test with no spill configuration as
-                let task_ctx_no_spill =
-                    TaskContext::default().with_session_config(session_config.clone());
+                let task_ctx_no_spill = TaskContextBuilder::new()
+                    .with_session_config(Some(session_config.clone()))
+                    .build();
                 let task_ctx_no_spill = Arc::new(task_ctx_no_spill);
 
                 let join = join_with_options(
@@ -3173,9 +3178,10 @@ mod tests {
             let session_config = SessionConfig::default().with_batch_size(batch_size);
 
             for join_type in &join_types {
-                let task_ctx = TaskContext::default()
-                    .with_session_config(session_config.clone())
-                    .with_runtime(Arc::clone(&runtime));
+                let task_ctx = TaskContextBuilder::new()
+                    .with_session_config(Some(session_config.clone()))
+                    .with_runtime(Some(Arc::clone(&runtime)))
+                    .build();
                 let task_ctx = Arc::new(task_ctx);
                 let join = join_with_options(
                     Arc::clone(&left),
@@ -3195,8 +3201,9 @@ mod tests {
                 assert!(metrics.spilled_rows().unwrap() > 0);
 
                 // Run the test with no spill configuration as
-                let task_ctx_no_spill =
-                    TaskContext::default().with_session_config(session_config.clone());
+                let task_ctx_no_spill = TaskContextBuilder::new()
+                    .with_session_config(Some(session_config.clone()))
+                    .build();
                 let task_ctx_no_spill = Arc::new(task_ctx_no_spill);
 
                 let join = join_with_options(

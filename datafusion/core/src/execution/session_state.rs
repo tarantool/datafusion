@@ -554,7 +554,7 @@ impl SessionState {
         &self,
         statement: &datafusion_sql::parser::Statement,
     ) -> datafusion_common::Result<SessionContextProvider> {
-        let references = self.resolve_table_references(&statement)?;
+        let references = self.resolve_table_references(statement)?;
 
         let mut provider = SessionContextProvider {
             state: self,

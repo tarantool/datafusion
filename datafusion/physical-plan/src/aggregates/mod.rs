@@ -1288,6 +1288,7 @@ mod tests {
     use datafusion_execution::config::SessionConfig;
     use datafusion_execution::memory_pool::FairSpillPool;
     use datafusion_execution::runtime_env::RuntimeEnvBuilder;
+    use datafusion_execution::TaskContextBuilder;
     use datafusion_functions_aggregate::array_agg::array_agg_udaf;
     use datafusion_functions_aggregate::average::avg_udaf;
     use datafusion_functions_aggregate::count::count_udaf;
@@ -1404,9 +1405,10 @@ mod tests {
             .with_memory_pool(Arc::new(FairSpillPool::new(max_memory)))
             .build_arc()
             .unwrap();
-        let task_ctx = TaskContext::default()
-            .with_session_config(session_config)
-            .with_runtime(runtime);
+        let task_ctx = TaskContextBuilder::new()
+            .with_session_config(Some(session_config))
+            .with_runtime(Some(runtime))
+            .build();
         Arc::new(task_ctx)
     }
 
@@ -1889,7 +1891,9 @@ mod tests {
         let runtime = RuntimeEnvBuilder::default()
             .with_memory_limit(1, 1.0)
             .build_arc()?;
-        let task_ctx = TaskContext::default().with_runtime(runtime);
+        let task_ctx = TaskContextBuilder::new()
+            .with_runtime(Some(runtime))
+            .build();
         let task_ctx = Arc::new(task_ctx);
 
         let groups_none = PhysicalGroupBy::default();
@@ -2506,7 +2510,9 @@ mod tests {
         )?);
 
         let session_config = SessionConfig::default();
-        let ctx = TaskContext::default().with_session_config(session_config);
+        let ctx = TaskContextBuilder::new()
+            .with_session_config(Some(session_config))
+            .build();
         let output = collect(aggregate_exec.execute(0, Arc::new(ctx))?).await?;
 
         let expected = [
@@ -2584,7 +2590,9 @@ mod tests {
             &ScalarValue::Float64(Some(0.1)),
         );
 
-        let ctx = TaskContext::default().with_session_config(session_config);
+        let ctx = TaskContextBuilder::new()
+            .with_session_config(Some(session_config))
+            .build();
         let output = collect(aggregate_exec.execute(0, Arc::new(ctx))?).await?;
 
         let expected = [
@@ -2674,7 +2682,9 @@ mod tests {
             &ScalarValue::Float64(Some(0.1)),
         );
 
-        let ctx = TaskContext::default().with_session_config(session_config);
+        let ctx = TaskContextBuilder::new()
+            .with_session_config(Some(session_config))
+            .build();
         let output = collect(aggregate_exec.execute(0, Arc::new(ctx))?).await?;
 
         let expected = [
