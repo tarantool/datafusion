@@ -38,6 +38,7 @@ use datafusion_expr::logical_plan::{LogicalPlan, LogicalPlanBuilder};
 use datafusion_expr::utils::find_column_exprs;
 use datafusion_expr::{col, Expr};
 
+use crate::parser::Statement;
 use crate::utils::{make_decimal_type, value_to_string};
 pub use datafusion_expr::planner::ContextProvider;
 
@@ -234,12 +235,41 @@ impl PlannerContext {
     }
 }
 
+/// SQL planner extension.
+///
+/// A way to extend default planning mechanism.
+pub trait SqlPlannerExtension<T: ContextProvider>: Send + Sync {
+    /// [`SqlToRel`] will call this method prior to apply the own analysis.
+    /// If this methods returns `Some` then a resulting plan is returned,
+    /// otherwise planner will apply the own analysis.
+    ///
+    fn statement_to_plan<'a>(
+        &self,
+        statement: &Statement,
+        planner: &SqlToRel<'a, T>,
+    ) -> Result<Option<LogicalPlan>>;
+}
+
+/// Default extensions does nothing.
+pub struct DefaultSqlPlannerExtension;
+
+impl<T: ContextProvider> SqlPlannerExtension<T> for DefaultSqlPlannerExtension {
+    fn statement_to_plan<'a>(
+        &self,
+        _statement: &Statement,
+        _planner: &SqlToRel<'a, T>,
+    ) -> Result<Option<LogicalPlan>> {
+        Ok(None)
+    }
+}
+
 /// SQL query planner
 pub struct SqlToRel<'a, S: ContextProvider> {
     pub(crate) context_provider: &'a S,
     pub(crate) options: ParserOptions,
     pub(crate) ident_normalizer: IdentNormalizer,
     pub(crate) value_normalizer: ValueNormalizer,
+    pub(crate) extension: Arc<dyn SqlPlannerExtension<S>>,
 }
 
 impl<'a, S: ContextProvider> SqlToRel<'a, S> {
@@ -258,6 +288,24 @@ impl<'a, S: ContextProvider> SqlToRel<'a, S> {
             options,
             ident_normalizer: IdentNormalizer::new(ident_normalize),
             value_normalizer: ValueNormalizer::new(options_value_normalize),
+            extension: Arc::new(DefaultSqlPlannerExtension),
+        }
+    }
+
+    pub fn new_with_options_and_extension(
+        context_provider: &'a S,
+        options: ParserOptions,
+        extension: Arc<dyn SqlPlannerExtension<S>>,
+    ) -> Self {
+        let ident_normalize = options.enable_ident_normalization;
+        let options_value_normalize = options.enable_options_value_normalization;
+
+        SqlToRel {
+            context_provider,
+            options,
+            ident_normalizer: IdentNormalizer::new(ident_normalize),
+            value_normalizer: ValueNormalizer::new(options_value_normalize),
+            extension,
         }
     }
 

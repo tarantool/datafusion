@@ -65,7 +65,9 @@ use datafusion_physical_expr_common::physical_expr::PhysicalExpr;
 use datafusion_physical_optimizer::PhysicalOptimizerRule;
 use datafusion_physical_plan::ExecutionPlan;
 use datafusion_sql::parser::{DFParser, Statement};
-use datafusion_sql::planner::{ContextProvider, ParserOptions, PlannerContext, SqlToRel};
+use datafusion_sql::planner::{
+    ContextProvider, ParserOptions, PlannerContext, SqlPlannerExtension, SqlToRel,
+};
 use itertools::Itertools;
 use log::{debug, info};
 use sqlparser::ast::Expr as SQLExpr;
@@ -104,11 +106,11 @@ use uuid::Uuid;
 /// # #[tokio::main]
 /// # async fn main() -> Result<()> {
 ///     let state = SessionStateBuilder::new()
-///         .with_config(SessionConfig::new())  
+///         .with_config(SessionConfig::new())
 ///         .with_runtime_env(Arc::new(RuntimeEnv::default()))
 ///         .with_default_features()
 ///         .build();
-///     Ok(())  
+///     Ok(())
 /// # }
 /// ```
 ///
@@ -169,6 +171,9 @@ pub struct SessionState {
     /// It will be invoked on `CREATE FUNCTION` statements.
     /// thus, changing dialect o PostgreSql is required
     function_factory: Option<Arc<dyn FunctionFactory>>,
+    // Optional extension for [`SqlToRel`] planner.
+    sql_planner_extension:
+        Option<Arc<dyn for<'a> SqlPlannerExtension<SessionContextProvider<'a>>>>,
 }
 
 impl Debug for SessionState {
@@ -545,11 +550,10 @@ impl SessionState {
         Ok(table_refs)
     }
 
-    /// Convert an AST Statement into a LogicalPlan
-    pub async fn statement_to_plan(
+    async fn create_provider(
         &self,
-        statement: datafusion_sql::parser::Statement,
-    ) -> datafusion_common::Result<LogicalPlan> {
+        statement: &datafusion_sql::parser::Statement,
+    ) -> datafusion_common::Result<SessionContextProvider> {
         let references = self.resolve_table_references(&statement)?;
 
         let mut provider = SessionContextProvider {
@@ -568,8 +572,24 @@ impl SessionState {
                 }
             }
         }
+        Ok(provider)
+    }
 
-        let query = SqlToRel::new_with_options(&provider, self.get_parser_options());
+    /// Convert an AST Statement into a LogicalPlan
+    pub async fn statement_to_plan(
+        &self,
+        statement: datafusion_sql::parser::Statement,
+    ) -> datafusion_common::Result<LogicalPlan> {
+        let provider = self.create_provider(&statement).await?;
+        let query = if let Some(ref extension) = self.sql_planner_extension {
+            SqlToRel::new_with_options_and_extension(
+                &provider,
+                self.get_parser_options(),
+                Arc::clone(extension),
+            )
+        } else {
+            SqlToRel::new_with_options(&provider, self.get_parser_options())
+        };
         query.statement_to_plan(statement)
     }
 
@@ -959,6 +979,8 @@ pub struct SessionStateBuilder {
     analyzer_rules: Option<Vec<Arc<dyn AnalyzerRule + Send + Sync>>>,
     optimizer_rules: Option<Vec<Arc<dyn OptimizerRule + Send + Sync>>>,
     physical_optimizer_rules: Option<Vec<Arc<dyn PhysicalOptimizerRule + Send + Sync>>>,
+    sql_planner_extension:
+        Option<Arc<dyn for<'a> SqlPlannerExtension<SessionContextProvider<'a>>>>,
 }
 
 impl SessionStateBuilder {
@@ -988,6 +1010,7 @@ impl SessionStateBuilder {
             analyzer_rules: None,
             optimizer_rules: None,
             physical_optimizer_rules: None,
+            sql_planner_extension: None,
         }
     }
 
@@ -1033,6 +1056,7 @@ impl SessionStateBuilder {
             table_factories: Some(existing.table_factories),
             runtime_env: Some(existing.runtime_env),
             function_factory: existing.function_factory,
+            sql_planner_extension: existing.sql_planner_extension,
 
             // fields to support convenience functions
             analyzer_rules: None,
@@ -1274,6 +1298,7 @@ impl SessionStateBuilder {
             analyzer_rules,
             optimizer_rules,
             physical_optimizer_rules,
+            sql_planner_extension,
         } = self;
 
         let config = config.unwrap_or_default();
@@ -1303,6 +1328,7 @@ impl SessionStateBuilder {
             table_factories: table_factories.unwrap_or_default(),
             runtime_env,
             function_factory,
+            sql_planner_extension,
         };
 
         if let Some(file_formats) = file_formats {
@@ -1514,7 +1540,7 @@ impl From<SessionState> for SessionStateBuilder {
 ///
 /// This is used so the SQL planner can access the state of the session without
 /// having a direct dependency on the [`SessionState`] struct (and core crate)
-struct SessionContextProvider<'a> {
+pub struct SessionContextProvider<'a> {
     state: &'a SessionState,
     tables: HashMap<ResolvedTableReference, Arc<dyn TableSource>>,
 }
