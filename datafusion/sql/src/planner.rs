@@ -292,6 +292,11 @@ impl<'a, S: ContextProvider> SqlToRel<'a, S> {
         }
     }
 
+    /// Project a context provider.
+    pub fn context_provider(&self) -> &'a S {
+        self.context_provider
+    }
+
     pub fn new_with_options_and_extension(
         context_provider: &'a S,
         options: ParserOptions,

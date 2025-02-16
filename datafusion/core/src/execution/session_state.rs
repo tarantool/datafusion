@@ -1545,6 +1545,13 @@ pub struct SessionContextProvider<'a> {
     tables: HashMap<ResolvedTableReference, Arc<dyn TableSource>>,
 }
 
+impl<'a> SessionContextProvider<'a> {
+    /// Project a session state.
+    pub fn state(&self) -> &'a SessionState {
+        self.state
+    }
+}
+
 impl ContextProvider for SessionContextProvider<'_> {
     fn get_expr_planners(&self) -> &[Arc<dyn ExprPlanner>] {
         &self.state.expr_planners
