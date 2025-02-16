@@ -1269,6 +1269,17 @@ impl SessionStateBuilder {
         self
     }
 
+    /// Set a sql planner extension.
+    pub fn with_sql_planner_extension(
+        mut self,
+        extension: Option<
+            Arc<dyn for<'a> SqlPlannerExtension<SessionContextProvider<'a>>>,
+        >,
+    ) -> Self {
+        self.sql_planner_extension = extension;
+        self
+    }
+
     /// Builds a [`SessionState`] with the current configuration.
     ///
     /// Note that there is an explicit option for enabling catalog and schema defaults
