@@ -31,7 +31,29 @@ use sqlparser::parser::ParserError::ParserError;
 use std::borrow::Cow;
 
 impl<S: ContextProvider> SqlToRel<'_, S> {
-    pub(crate) fn parse_value(
+    /// Conver a value to the scalar.
+    pub fn parse_scalar(&self, value: Value) -> Result<Expr> {
+        match value {
+            Value::Number(n, _) => self.parse_sql_number(&n, false),
+            Value::SingleQuotedString(s) | Value::DoubleQuotedString(s) => Ok(lit(s)),
+            Value::Null => Ok(Expr::Literal(ScalarValue::Null)),
+            Value::Boolean(n) => Ok(lit(n)),
+
+            Value::HexStringLiteral(s) => {
+                if let Some(v) = try_decode_hex_literal(&s) {
+                    Ok(lit(v))
+                } else {
+                    plan_err!("Invalid HexStringLiteral '{s}'")
+                }
+            }
+            Value::DollarQuotedString(s) => Ok(lit(s.value)),
+            Value::EscapedStringLiteral(s) => Ok(lit(s)),
+            _ => plan_err!("Unsupported scalar '{value:?}'"),
+        }
+    }
+
+    /// Conver a value to the expression.
+    pub fn parse_value(
         &self,
         value: Value,
         param_data_types: &[DataType],
