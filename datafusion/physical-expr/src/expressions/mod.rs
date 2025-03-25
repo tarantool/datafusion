@@ -56,6 +56,8 @@ pub use literal::{lit, Literal};
 pub use negative::{negative, NegativeExpr};
 pub use no_op::NoOp;
 pub use not::{not, NotExpr};
-pub use placeholder::{placeholder, resolve_placeholders, resolve_placeholders_seq};
+pub use placeholder::{
+    placeholder, resolve_placeholders, resolve_placeholders_seq, PlaceholderExpr,
+};
 pub use try_cast::{try_cast, TryCastExpr};
 pub use unknown_column::UnKnownColumn;
