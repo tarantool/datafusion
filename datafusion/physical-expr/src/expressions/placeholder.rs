@@ -41,9 +41,9 @@ use crate::expressions::lit;
 #[derive(Debug, PartialEq, Eq, Hash)]
 pub struct PlaceholderExpr {
     // Placeholder id, e.g. $1 or $a.
-    id: String,
+    pub id: String,
     // Derived from expression where placeholder is met.
-    data_type: DataType,
+    pub data_type: DataType,
 }
 
 impl PlaceholderExpr {
