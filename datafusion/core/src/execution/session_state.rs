@@ -104,11 +104,11 @@ use uuid::Uuid;
 /// # #[tokio::main]
 /// # async fn main() -> Result<()> {
 ///     let state = SessionStateBuilder::new()
-///         .with_config(SessionConfig::new())  
+///         .with_config(SessionConfig::new())
 ///         .with_runtime_env(Arc::new(RuntimeEnv::default()))
 ///         .with_default_features()
 ///         .build();
-///     Ok(())  
+///     Ok(())
 /// # }
 /// ```
 ///
@@ -876,10 +876,7 @@ impl SessionState {
     }
 
     /// set the catalog list
-    pub(crate) fn register_catalog_list(
-        &mut self,
-        catalog_list: Arc<dyn CatalogProviderList>,
-    ) {
+    pub fn register_catalog_list(&mut self, catalog_list: Arc<dyn CatalogProviderList>) {
         self.catalog_list = catalog_list;
     }
 
