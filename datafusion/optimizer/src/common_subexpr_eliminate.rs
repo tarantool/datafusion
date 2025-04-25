@@ -527,6 +527,19 @@ impl CommonSubexprEliminate {
                         } => {
                             let rewritten_aggr_expr = new_exprs_list.pop().unwrap();
                             let new_aggr_expr = original_exprs_list.pop().unwrap();
+                            let saved_names = if let Some(aggr_expr) = aggr_expr {
+                                let name_perserver = NamePreserver::new_for_projection();
+                                aggr_expr
+                                    .iter()
+                                    .map(|expr| Some(name_perserver.save(expr)))
+                                    .collect::<Vec<_>>()
+                            } else {
+                                new_aggr_expr
+                                    .clone()
+                                    .into_iter()
+                                    .map(|_| None)
+                                    .collect::<Vec<_>>()
+                            };
 
                             let mut agg_exprs = common_exprs
                                 .into_iter()
@@ -542,8 +555,11 @@ impl CommonSubexprEliminate {
                                     &mut proj_exprs,
                                 )?
                             }
-                            for (expr_rewritten, expr_orig) in
-                                rewritten_aggr_expr.into_iter().zip(new_aggr_expr)
+                            for ((expr_rewritten, expr_orig), saved_name) in
+                                rewritten_aggr_expr
+                                    .into_iter()
+                                    .zip(new_aggr_expr)
+                                    .zip(saved_names)
                             {
                                 if expr_rewritten == expr_orig {
                                     if let Expr::Alias(Alias { expr, name, .. }) =
@@ -557,10 +573,25 @@ impl CommonSubexprEliminate {
                                             config.alias_generator().next(CSE_PREFIX);
                                         let (qualifier, field) =
                                             expr_rewritten.to_field(&new_input_schema)?;
-                                        let out_name = qualified_name(
-                                            qualifier.as_ref(),
-                                            field.name(),
-                                        );
+                                        let out_name = if let Some(expr) = saved_name {
+                                            let name = if let Expr::Alias(Alias {
+                                                expr: _,
+                                                name,
+                                                ..
+                                            }) =
+                                                expr.restore(expr_rewritten.clone())
+                                            {
+                                                name
+                                            } else {
+                                                field.name().to_string()
+                                            };
+                                            qualified_name(qualifier.as_ref(), &name)
+                                        } else {
+                                            qualified_name(
+                                                qualifier.as_ref(),
+                                                field.name(),
+                                            )
+                                        };
 
                                         agg_exprs.push(expr_rewritten.alias(&expr_alias));
                                         proj_exprs.push(
