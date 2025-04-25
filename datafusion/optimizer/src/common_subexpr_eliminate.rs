@@ -527,6 +527,19 @@ impl CommonSubexprEliminate {
                         } => {
                             let rewritten_aggr_expr = new_exprs_list.pop().unwrap();
                             let new_aggr_expr = original_exprs_list.pop().unwrap();
+                            let saved_names = if let Some(aggr_expr) = aggr_expr {
+                                let name_perserver = NamePreserver::new_for_projection();
+                                aggr_expr
+                                    .iter()
+                                    .map(|expr| Some(name_perserver.save(expr)))
+                                    .collect::<Vec<_>>()
+                            } else {
+                                new_aggr_expr
+                                    .clone()
+                                    .into_iter()
+                                    .map(|_| None)
+                                    .collect::<Vec<_>>()
+                            };
 
                             let mut agg_exprs = common_exprs
                                 .into_iter()
@@ -542,10 +555,19 @@ impl CommonSubexprEliminate {
                                     &mut proj_exprs,
                                 )?
                             }
-                            for (expr_rewritten, expr_orig) in
-                                rewritten_aggr_expr.into_iter().zip(new_aggr_expr)
+                            for ((expr_rewritten, expr_orig), saved_name) in
+                                rewritten_aggr_expr
+                                    .into_iter()
+                                    .zip(new_aggr_expr)
+                                    .zip(saved_names)
                             {
                                 if expr_rewritten == expr_orig {
+                                    let expr_rewritten =
+                                        if let Some(saved_name) = saved_name {
+                                            saved_name.restore(expr_rewritten)
+                                        } else {
+                                            expr_rewritten
+                                        };
                                     if let Expr::Alias(Alias { expr, name, .. }) =
                                         expr_rewritten
                                     {
