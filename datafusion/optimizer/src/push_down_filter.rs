@@ -872,7 +872,13 @@ impl OptimizerRule for PushDownFilter {
                 convert_to_cross_join_if_beneficial(plan.data)
             }
             LogicalPlan::TableScan(scan) => {
-                let filter_predicates = split_conjunction(&filter.predicate);
+                let filter_predicates: Vec<_> = split_conjunction(&filter.predicate)
+                    .into_iter()
+                    // Add already pushed filters.
+                    .chain(scan.filters.iter())
+                    .unique()
+                    .collect();
+
                 let results = scan
                     .source
                     .supports_filters_pushdown(filter_predicates.as_slice())?;
@@ -889,13 +895,8 @@ impl OptimizerRule for PushDownFilter {
                     .clone()
                     .filter(|(_, res)| res != &TableProviderFilterPushDown::Unsupported)
                     .map(|(pred, _)| pred);
-                let new_scan_filters: Vec<Expr> = scan
-                    .filters
-                    .iter()
-                    .chain(new_scan_filters)
-                    .unique()
-                    .cloned()
-                    .collect();
+                let new_scan_filters: Vec<Expr> =
+                    new_scan_filters.unique().cloned().collect();
                 let new_predicate: Vec<Expr> = zip
                     .filter(|(_, res)| res != &TableProviderFilterPushDown::Exact)
                     .map(|(pred, _)| pred.clone())
