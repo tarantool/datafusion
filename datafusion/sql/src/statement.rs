@@ -1102,26 +1102,7 @@ impl<S: ContextProvider> SqlToRel<'_, S> {
             return plan_err!("Nested EXPLAINs are not supported");
         }
         let plan = Arc::new(plan);
-        let schema = LogicalPlan::explain_schema();
-        let schema = schema.to_dfschema_ref()?;
-
-        if analyze {
-            Ok(LogicalPlan::Analyze(Analyze {
-                verbose,
-                input: plan,
-                schema,
-            }))
-        } else {
-            let stringified_plans =
-                vec![plan.to_stringified(PlanType::InitialLogicalPlan)];
-            Ok(LogicalPlan::Explain(Explain {
-                verbose,
-                plan,
-                stringified_plans,
-                schema,
-                logical_optimization_succeeded: false,
-            }))
-        }
+        make_explain(verbose, analyze, plan)
     }
 
     fn show_variable_to_plan(&self, variable: &[Ident]) -> Result<LogicalPlan> {
@@ -1597,5 +1578,32 @@ impl<S: ContextProvider> SqlToRel<'_, S> {
         self.context_provider
             .get_table_source(tables_reference)
             .is_ok()
+    }
+}
+
+/// Make an explain node using provided plan and explan parameters.
+pub fn make_explain(
+    verbose: bool,
+    analyze: bool,
+    plan: Arc<LogicalPlan>,
+) -> Result<LogicalPlan> {
+    let schema = LogicalPlan::explain_schema();
+    let schema = schema.to_dfschema_ref()?;
+
+    if analyze {
+        Ok(LogicalPlan::Analyze(Analyze {
+            verbose,
+            input: plan,
+            schema,
+        }))
+    } else {
+        let stringified_plans = vec![plan.to_stringified(PlanType::InitialLogicalPlan)];
+        Ok(LogicalPlan::Explain(Explain {
+            verbose,
+            plan,
+            stringified_plans,
+            schema,
+            logical_optimization_succeeded: false,
+        }))
     }
 }

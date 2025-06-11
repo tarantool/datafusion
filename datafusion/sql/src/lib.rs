@@ -43,6 +43,7 @@ mod relation;
 mod select;
 mod set_expr;
 mod statement;
+pub use statement::make_explain;
 #[cfg(feature = "unparser")]
 pub mod unparser;
 pub mod utils;
