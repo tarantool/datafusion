@@ -810,7 +810,7 @@ impl LogicalPlan {
             }
             LogicalPlan::Dml(DmlStatement {
                 table_name,
-                table_schema,
+                dst,
                 op,
                 ..
             }) => {
@@ -818,7 +818,7 @@ impl LogicalPlan {
                 let input = self.only_input(inputs)?;
                 Ok(LogicalPlan::Dml(DmlStatement::new(
                     table_name.clone(),
-                    Arc::clone(table_schema),
+                    Arc::clone(dst),
                     op.clone(),
                     Arc::new(input),
                 )))
@@ -1987,7 +1987,7 @@ impl LogicalPlan {
                             .map(|i| &input_columns[*i])
                             .collect::<Vec<&Column>>();
                         // get items from input_columns indexed by list_col_indices
-                        write!(f, "Unnest: lists[{}] structs[{}]", 
+                        write!(f, "Unnest: lists[{}] structs[{}]",
                         expr_vec_fmt!(list_type_columns),
                         expr_vec_fmt!(struct_type_columns))
                     }

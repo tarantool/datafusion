@@ -792,6 +792,7 @@ mod tests {
     use crate::datasource::file_format::test_util::scan_format;
     use crate::datasource::listing::{FileRange, ListingOptions};
     use crate::datasource::object_store::ObjectStoreUrl;
+    use crate::datasource::provider_as_source;
     use crate::execution::context::SessionState;
     use crate::physical_plan::displayable;
     use crate::prelude::{ParquetReadOptions, SessionConfig, SessionContext};
@@ -816,6 +817,7 @@ mod tests {
     use datafusion_physical_plan::ExecutionPlanProperties;
 
     use chrono::{TimeZone, Utc};
+    use datafusion_sql::TableReference;
     use futures::StreamExt;
     use object_store::local::LocalFileSystem;
     use object_store::path::Path;
@@ -2024,8 +2026,16 @@ mod tests {
         )
         .await
         .unwrap();
-        df.write_table("my_table", DataFrameWriteOptions::new())
-            .await?;
+        let dst = ctx
+            .table_provider(TableReference::bare("my_table"))
+            .await
+            .unwrap();
+        df.write_table(
+            "my_table",
+            provider_as_source(dst),
+            DataFrameWriteOptions::new(),
+        )
+        .await?;
 
         // create a new context and verify that the results were saved to a partitioned parquet file
         let ctx = SessionContext::new();

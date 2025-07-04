@@ -302,11 +302,9 @@ impl LogicalPlanBuilder {
     pub fn insert_into(
         input: LogicalPlan,
         table_name: impl Into<TableReference>,
-        table_schema: &Schema,
+        dst: Arc<dyn TableSource>,
         overwrite: bool,
     ) -> Result<Self> {
-        let table_schema = table_schema.clone().to_dfschema_ref()?;
-
         let op = if overwrite {
             WriteOp::InsertOverwrite
         } else {
@@ -315,7 +313,7 @@ impl LogicalPlanBuilder {
 
         Ok(Self::new(LogicalPlan::Dml(DmlStatement::new(
             table_name.into(),
-            table_schema,
+            dst,
             op,
             Arc::new(input),
         ))))

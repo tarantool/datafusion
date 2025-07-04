@@ -15,9 +15,11 @@
 // specific language governing permissions and limitations
 // under the License.
 
+use datafusion::datasource::provider_as_source;
 use datafusion::{dataframe::DataFrameWriteOptions, prelude::*};
 use datafusion_common::config::CsvOptions;
 use datafusion_common::{parsers::CompressionTypeVariant, DataFusionError};
+use datafusion_sql::TableReference;
 
 /// This example demonstrates the various methods to write out a DataFrame to local storage.
 /// See datafusion-examples/examples/external_dependency/dataframe-to-s3.rs for an example
@@ -32,20 +34,26 @@ async fn main() -> Result<(), DataFusionError> {
     df = df.with_column_renamed("column1", "tablecol1").unwrap();
 
     ctx.sql(
-        "create external table 
+        "create external table
     test(tablecol1 varchar)
-    stored as parquet 
+    stored as parquet
     location './datafusion-examples/test_table/'",
     )
     .await?
     .collect()
     .await?;
 
+    let dst = ctx.table_provider(TableReference::bare("test")).await?;
+
     // This is equivalent to INSERT INTO test VALUES ('a'), ('b'), ('c').
     // The behavior of write_table depends on the TableProvider's implementation
     // of the insert_into method.
     df.clone()
-        .write_table("test", DataFrameWriteOptions::new())
+        .write_table(
+            "test",
+            provider_as_source(dst),
+            DataFrameWriteOptions::new(),
+        )
         .await?;
 
     df.clone()

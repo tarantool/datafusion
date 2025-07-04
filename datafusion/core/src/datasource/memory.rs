@@ -625,8 +625,13 @@ mod tests {
         // Create a table scan logical plan to read from the source table
         let scan_plan = LogicalPlanBuilder::scan("source", source, None)?.build()?;
         // Create an insert plan to insert the source data into the initial table
-        let insert_into_table =
-            LogicalPlanBuilder::insert_into(scan_plan, "t", &schema, false)?.build()?;
+        let insert_into_table = LogicalPlanBuilder::insert_into(
+            scan_plan,
+            "t",
+            provider_as_source(Arc::clone(&initial_table) as Arc<_>),
+            false,
+        )?
+        .build()?;
         // Create a physical plan from the insert plan
         let plan = session_ctx
             .state()

@@ -68,8 +68,7 @@ use arrow_array::builder::StringBuilder;
 use arrow_array::RecordBatch;
 use datafusion_common::display::ToStringifiedPlan;
 use datafusion_common::{
-    exec_err, internal_datafusion_err, internal_err, not_impl_err, plan_err, DFSchema,
-    ScalarValue,
+    internal_datafusion_err, internal_err, not_impl_err, plan_err, DFSchema, ScalarValue,
 };
 use datafusion_expr::dml::CopyTo;
 use datafusion_expr::expr::{
@@ -540,36 +539,26 @@ impl DefaultPhysicalPlanner {
                     .await?
             }
             LogicalPlan::Dml(DmlStatement {
-                table_name,
                 op: WriteOp::InsertInto,
+                dst,
                 ..
             }) => {
-                let name = table_name.table();
-                let schema = session_state.schema_for_ref(table_name.clone())?;
-                if let Some(provider) = schema.table(name).await? {
-                    let input_exec = children.one()?;
-                    provider
-                        .insert_into(session_state, input_exec, false)
-                        .await?
-                } else {
-                    return exec_err!("Table '{table_name}' does not exist");
-                }
+                let input_exec = children.one()?;
+                let provider = source_as_provider(dst)?;
+                provider
+                    .insert_into(session_state, input_exec, false)
+                    .await?
             }
             LogicalPlan::Dml(DmlStatement {
-                table_name,
+                dst,
                 op: WriteOp::InsertOverwrite,
                 ..
             }) => {
-                let name = table_name.table();
-                let schema = session_state.schema_for_ref(table_name.clone())?;
-                if let Some(provider) = schema.table(name).await? {
-                    let input_exec = children.one()?;
-                    provider
-                        .insert_into(session_state, input_exec, true)
-                        .await?
-                } else {
-                    return exec_err!("Table '{table_name}' does not exist");
-                }
+                let input_exec = children.one()?;
+                let provider = source_as_provider(dst)?;
+                provider
+                    .insert_into(session_state, input_exec, true)
+                    .await?
             }
             LogicalPlan::Window(Window {
                 input, window_expr, ..

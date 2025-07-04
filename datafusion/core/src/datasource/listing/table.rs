@@ -1091,6 +1091,7 @@ mod tests {
     use datafusion_physical_expr::PhysicalSortExpr;
     use datafusion_physical_plan::ExecutionPlanProperties;
 
+    use datafusion_sql::TableReference;
     use tempfile::TempDir;
 
     #[tokio::test]
@@ -1890,6 +1891,11 @@ mod tests {
             _ => panic!("Unrecognized file extension {file_type_ext}"),
         }
 
+        let dst_table = session_ctx
+            .table_provider(TableReference::bare("t"))
+            .await
+            .unwrap();
+
         // Create and register the source table with the provided schema and inserted data
         let source_table = Arc::new(MemTable::try_new(
             schema.clone(),
@@ -1905,8 +1911,13 @@ mod tests {
         // Since logical plan contains a filter, increasing parallelism is helpful.
         // Therefore, we will have 8 partitions in the final plan.
         // Create an insert plan to insert the source data into the initial table
-        let insert_into_table =
-            LogicalPlanBuilder::insert_into(scan_plan, "t", &schema, false)?.build()?;
+        let insert_into_table = LogicalPlanBuilder::insert_into(
+            scan_plan,
+            "t",
+            provider_as_source(dst_table),
+            false,
+        )?
+        .build()?;
         // Create a physical plan from the insert plan
         let plan = session_ctx
             .state()
