@@ -52,7 +52,7 @@ use datafusion_common::config::{CsvOptions, JsonOptions};
 use datafusion_common::{
     plan_err, Column, DFSchema, DataFusionError, ParamValues, SchemaError, UnnestOptions,
 };
-use datafusion_expr::{case, is_null, lit, SortExpr};
+use datafusion_expr::{case, is_null, lit, SortExpr, TableSource};
 use datafusion_expr::{
     utils::COUNT_STAR_EXPANSION, TableProviderFilterPushDown, UNNAMED_TABLE,
 };
@@ -1296,13 +1296,13 @@ impl DataFrame {
     pub async fn write_table(
         self,
         table_name: &str,
+        dst: Arc<dyn TableSource>,
         write_options: DataFrameWriteOptions,
     ) -> Result<Vec<RecordBatch>, DataFusionError> {
-        let arrow_schema = Schema::from(self.schema());
         let plan = LogicalPlanBuilder::insert_into(
             self.plan,
             table_name.to_owned(),
-            &arrow_schema,
+            dst,
             write_options.overwrite,
         )?
         .build()?;

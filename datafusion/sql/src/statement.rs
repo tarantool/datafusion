@@ -1250,7 +1250,7 @@ impl<S: ContextProvider> SqlToRel<'_, S> {
         let schema = DFSchema::try_from(schema)?;
         let scan = LogicalPlanBuilder::scan(
             object_name_to_string(&table_name),
-            table_source,
+            Arc::clone(&table_source),
             None,
         )?
         .build()?;
@@ -1275,7 +1275,7 @@ impl<S: ContextProvider> SqlToRel<'_, S> {
 
         let plan = LogicalPlan::Dml(DmlStatement::new(
             table_ref,
-            schema.into(),
+            table_source,
             WriteOp::Delete,
             Arc::new(source),
         ));
@@ -1388,7 +1388,7 @@ impl<S: ContextProvider> SqlToRel<'_, S> {
 
         let plan = LogicalPlan::Dml(DmlStatement::new(
             table_name,
-            table_schema,
+            table_source,
             WriteOp::Update,
             Arc::new(source),
         ));
@@ -1511,7 +1511,7 @@ impl<S: ContextProvider> SqlToRel<'_, S> {
 
         let plan = LogicalPlan::Dml(DmlStatement::new(
             table_name,
-            Arc::new(table_schema),
+            table_source,
             op,
             Arc::new(source),
         ));
