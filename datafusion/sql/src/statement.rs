@@ -37,7 +37,7 @@ use datafusion_common::{
     DataFusionError, Result, ScalarValue, SchemaError, SchemaReference, TableReference,
     ToDFSchema,
 };
-use datafusion_expr::dml::CopyTo;
+use datafusion_expr::dml::{CopyTo, Truncate};
 use datafusion_expr::expr_rewriter::normalize_col_with_schemas_and_ambiguity_check;
 use datafusion_expr::logical_plan::builder::project;
 use datafusion_expr::logical_plan::DdlStatement;
@@ -542,7 +542,21 @@ impl<S: ContextProvider> SqlToRel<'_, S> {
                 }
                 self.update_to_plan(table, assignments, from, selection)
             }
+            Statement::Truncate {
+                table_name,
+                partitions,
+                table,
+            } => {
+                if !table {
+                    plan_err!("Truncate of non-tables not yet supported")?;
+                }
 
+                if partitions.is_some() {
+                    plan_err!("Partition clause not supported")?;
+                }
+
+                self.truncate_to_plan(table_name)
+            }
             Statement::Delete(Delete {
                 tables,
                 using,
@@ -1496,6 +1510,15 @@ impl<S: ContextProvider> SqlToRel<'_, S> {
             op,
             Arc::new(source),
         ));
+        Ok(plan)
+    }
+
+    fn truncate_to_plan(&self, table_name: ObjectName) -> Result<LogicalPlan> {
+        // Do a table lookup to verify the table exists
+        let table_ref = self.object_name_to_table_reference(table_name.clone())?;
+        let _ = self.context_provider.get_table_source(table_ref.clone())?;
+
+        let plan = LogicalPlan::Truncate(Truncate::new(table_ref));
         Ok(plan)
     }
 

@@ -1228,6 +1228,10 @@ impl DefaultPhysicalPlanner {
                     "Unsupported logical plan: Analyze must be root of the plan"
                 )
             }
+            LogicalPlan::Truncate(_) => {
+                // DataFusion is a read-only query engine, but also a library, so consumers may implement this
+                return not_impl_err!("Unsupported logical plan: Truncate");
+            }
         };
         Ok(exec_node)
     }

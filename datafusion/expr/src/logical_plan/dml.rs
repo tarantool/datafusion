@@ -71,6 +71,31 @@ impl Hash for CopyTo {
     }
 }
 
+/// Operator that truncates the content of a table
+#[derive(Debug, Clone, PartialEq, Eq, Hash)]
+pub struct Truncate {
+    /// The table name
+    pub table_name: TableReference,
+    /// The schema of the output relation
+    pub output_schema: DFSchemaRef,
+}
+
+impl Truncate {
+    /// Creates a new truncate statement with the output schema set empty.
+    pub fn new(table_name: TableReference) -> Self {
+        Self {
+            table_name,
+
+            // The output schema is always empty
+            output_schema: make_empty_schema(),
+        }
+    }
+}
+
+fn make_empty_schema() -> DFSchemaRef {
+    Arc::new(Schema::empty().try_into().unwrap())
+}
+
 /// The operator that modifies the content of a database (adapted from
 /// substrait WriteRel)
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]

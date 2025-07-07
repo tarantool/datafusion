@@ -374,7 +374,8 @@ impl TreeNode for LogicalPlan {
             | LogicalPlan::Statement { .. }
             | LogicalPlan::EmptyRelation { .. }
             | LogicalPlan::Values { .. }
-            | LogicalPlan::DescribeTable(_) => Transformed::no(self),
+            | LogicalPlan::DescribeTable(_)
+            | LogicalPlan::Truncate(_) => Transformed::no(self),
         })
     }
 }
@@ -527,7 +528,8 @@ impl LogicalPlan {
             | LogicalPlan::Ddl(_)
             | LogicalPlan::Copy(_)
             | LogicalPlan::DescribeTable(_)
-            | LogicalPlan::Prepare(_) => Ok(TreeNodeRecursion::Continue),
+            | LogicalPlan::Prepare(_)
+            | LogicalPlan::Truncate(_) => Ok(TreeNodeRecursion::Continue),
         }
     }
 
@@ -739,7 +741,8 @@ impl LogicalPlan {
             | LogicalPlan::Ddl(_)
             | LogicalPlan::Copy(_)
             | LogicalPlan::DescribeTable(_)
-            | LogicalPlan::Prepare(_) => Transformed::no(self),
+            | LogicalPlan::Prepare(_)
+            | LogicalPlan::Truncate(_) => Transformed::no(self),
         })
     }
 

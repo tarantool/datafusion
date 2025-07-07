@@ -25,6 +25,7 @@ use std::sync::Arc;
 use super::dml::CopyTo;
 use super::DdlStatement;
 use crate::builder::{change_redundant_column, unnest_with_options};
+use crate::dml::Truncate;
 use crate::expr::{Placeholder, Sort as SortExpr, WindowFunction};
 use crate::expr_rewriter::{
     create_col_from_scalar_expr, normalize_cols, normalize_sorts, NamePreserver,
@@ -280,6 +281,8 @@ pub enum LogicalPlan {
     Unnest(Unnest),
     /// A variadic query (e.g. "Recursive CTEs")
     RecursiveQuery(RecursiveQuery),
+    /// Truncate a table
+    Truncate(Truncate),
 }
 
 impl Default for LogicalPlan {
@@ -330,6 +333,7 @@ impl LogicalPlan {
                 // we take the schema of the static term as the schema of the entire recursive query
                 static_term.schema()
             }
+            LogicalPlan::Truncate(Truncate { output_schema, .. }) => output_schema,
         }
     }
 
@@ -481,7 +485,8 @@ impl LogicalPlan {
             | LogicalPlan::Statement { .. }
             | LogicalPlan::EmptyRelation { .. }
             | LogicalPlan::Values { .. }
-            | LogicalPlan::DescribeTable(_) => vec![],
+            | LogicalPlan::DescribeTable(_)
+            | LogicalPlan::Truncate(_) => vec![],
         }
     }
 
@@ -598,7 +603,8 @@ impl LogicalPlan {
             | LogicalPlan::Copy(_)
             | LogicalPlan::Ddl(_)
             | LogicalPlan::DescribeTable(_)
-            | LogicalPlan::Unnest(_) => Ok(None),
+            | LogicalPlan::Unnest(_)
+            | LogicalPlan::Truncate(_) => Ok(None),
         }
     }
 
@@ -768,6 +774,7 @@ impl LogicalPlan {
                 // Update schema with unnested column type.
                 unnest_with_options(Arc::unwrap_or_clone(input), exec_columns, options)
             }
+            LogicalPlan::Truncate(_) => Ok(self),
         }
     }
 
@@ -1117,7 +1124,8 @@ impl LogicalPlan {
             LogicalPlan::EmptyRelation(_)
             | LogicalPlan::Ddl(_)
             | LogicalPlan::Statement(_)
-            | LogicalPlan::DescribeTable(_) => {
+            | LogicalPlan::DescribeTable(_)
+            | LogicalPlan::Truncate(_) => {
                 // All of these plan types have no inputs / exprs so should not be called
                 self.assert_no_expressions(expr)?;
                 self.assert_no_inputs(inputs)?;
@@ -1367,7 +1375,8 @@ impl LogicalPlan {
             | LogicalPlan::DescribeTable(_)
             | LogicalPlan::Prepare(_)
             | LogicalPlan::Statement(_)
-            | LogicalPlan::Extension(_) => None,
+            | LogicalPlan::Extension(_)
+            | LogicalPlan::Truncate(_) => None,
         }
     }
 
@@ -1990,6 +1999,9 @@ impl LogicalPlan {
                         write!(f, "Unnest: lists[{}] structs[{}]", 
                         expr_vec_fmt!(list_type_columns),
                         expr_vec_fmt!(struct_type_columns))
+                    },
+                    LogicalPlan::Truncate(_) => {
+                        write!(f, "Truncate")
                     }
                 }
             }
