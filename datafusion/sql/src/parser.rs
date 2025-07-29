@@ -279,12 +279,17 @@ impl<'a> DFParser<'a> {
         sql: &str,
         dialect: &'a dyn Dialect,
     ) -> Result<Self, ParserError> {
-        let mut tokenizer = Tokenizer::new(dialect, sql);
-        let tokens = tokenizer.tokenize()?;
+        let tokens = Tokenizer::new(dialect, sql).into_tokens().collect::<Result<_, _>>()?;
+        Ok(Self::from_dialect_and_tokens(dialect, tokens))
+    }
 
-        Ok(DFParser {
-            parser: Parser::new(dialect).with_tokens(tokens),
-        })
+    /// Create a new parser from specified dialect and tokens.
+    pub fn from_dialect_and_tokens(
+        dialect: &'a dyn Dialect,
+        tokens: Vec<Token>,
+    ) -> Self {
+        let parser = Parser::new(dialect).with_tokens(tokens);
+        DFParser { parser }
     }
 
     /// Parse a sql string into one or [`Statement`]s using the
@@ -300,7 +305,18 @@ impl<'a> DFParser<'a> {
         sql: &str,
         dialect: &dyn Dialect,
     ) -> Result<VecDeque<Statement>, ParserError> {
-        let mut parser = DFParser::new_with_dialect(sql, dialect)?;
+        let tokenizer = Tokenizer::new(dialect, sql);
+        let tokens = tokenizer.into_tokens().collect::<Result<_, _>>()?;
+        Self::parse_tokens_with_dialect(tokens, dialect)
+    }
+
+    /// Parse SQL tokens and produce one or more [`Statement`]s with
+    /// the specified dialect.
+    pub fn parse_tokens_with_dialect(
+        tokens: Vec<Token>,
+        dialect: &dyn Dialect,
+    ) -> Result<VecDeque<Statement>, ParserError> {
+        let mut parser = DFParser::from_dialect_and_tokens(dialect, tokens);
         let mut stmts = VecDeque::new();
         let mut expecting_statement_delimiter = false;
         loop {
