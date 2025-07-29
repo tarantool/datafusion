@@ -137,7 +137,7 @@ rand = "0.8"
 regex = "1.8"
 rstest = "0.22.0"
 serde_json = "1"
-sqlparser = { version = "0.50.0", features = ["visitor"] }
+sqlparser = { git = "https://github.com/tarantool/datafusion-sqlparser-rs.git", features = ["visitor"], branch = "release-0.50.0" }
 tempfile = "3"
 thiserror = "1.0.44"
 tokio = { version = "1.36", features = ["macros", "rt", "sync"] }
