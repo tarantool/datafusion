@@ -28,15 +28,13 @@ use datafusion_common::{
     JoinConstraint, Result,
 };
 use datafusion_expr::expr_rewriter::replace_col;
-use datafusion_expr::logical_plan::{
-    CrossJoin, Join, JoinType, LogicalPlan, TableScan, Union,
-};
+use datafusion_expr::logical_plan::{CrossJoin, Join, JoinType, LogicalPlan, Union};
 use datafusion_expr::utils::{
     conjunction, expr_to_columns, split_conjunction, split_conjunction_owned,
 };
 use datafusion_expr::{
     and, build_join_schema, or, BinaryExpr, Expr, Filter, LogicalPlanBuilder, Operator,
-    Projection, TableProviderFilterPushDown,
+    Projection, TableProviderFilterPushDown, TableScan,
 };
 
 use crate::optimizer::ApplyOrder;
@@ -897,23 +895,103 @@ impl OptimizerRule for PushDownFilter {
                     .map(|(pred, _)| pred);
                 let new_scan_filters: Vec<Expr> =
                     new_scan_filters.unique().cloned().collect();
+
+                let source_schema = scan.source.schema();
+                let mut additional_projection = HashSet::new();
                 let new_predicate: Vec<Expr> = zip
-                    .filter(|(_, res)| res != &TableProviderFilterPushDown::Exact)
+                    .filter(|(expr, res)| {
+                        if *res == TableProviderFilterPushDown::Exact {
+                            return false;
+                        }
+                        expr.apply(|expr| {
+                            if let Expr::Column(column) = expr {
+                                if let Ok(idx) = source_schema.index_of(column.name()) {
+                                    if scan
+                                        .projection
+                                        .as_ref()
+                                        .is_some_and(|p| !p.contains(&idx))
+                                    {
+                                        additional_projection.insert(idx);
+                                    }
+                                }
+                            }
+                            Ok(TreeNodeRecursion::Continue)
+                        })
+                        .unwrap();
+                        true
+                    })
                     .map(|(pred, _)| pred.clone())
                     .collect();
 
-                let new_scan = LogicalPlan::TableScan(TableScan {
-                    filters: new_scan_filters,
-                    ..scan
-                });
-
-                Transformed::yes(new_scan).transform_data(|new_scan| {
-                    if let Some(predicate) = conjunction(new_predicate) {
-                        make_filter(predicate, Arc::new(new_scan)).map(Transformed::yes)
+                // Wraps with a filter if some filters are not supported exactly.
+                let filtered = move |plan| {
+                    if let Some(new_predicate) = conjunction(new_predicate) {
+                        Filter::try_new(new_predicate, Arc::new(plan))
+                            .map(LogicalPlan::Filter)
                     } else {
-                        Ok(Transformed::no(new_scan))
+                        Ok(plan)
                     }
-                })
+                };
+
+                if additional_projection.is_empty() {
+                    // No additional projection is required.
+                    let new_scan = LogicalPlan::TableScan(TableScan {
+                        filters: new_scan_filters,
+                        ..scan
+                    });
+                    return filtered(new_scan).map(Transformed::yes);
+                }
+
+                let scan_table_name = &scan.table_name;
+                let new_scan = filtered(
+                    LogicalPlanBuilder::scan_with_filters_fetch(
+                        scan_table_name.clone(),
+                        Arc::clone(&scan.source),
+                        scan.projection.clone().map(|mut projection| {
+                            // Extend a projection.
+                            projection.extend(additional_projection);
+                            projection
+                        }),
+                        new_scan_filters,
+                        scan.fetch,
+                    )?
+                    .build()?,
+                )?;
+
+                // Project fields required by the initial projection.
+                let new_plan = LogicalPlan::Projection(Projection::try_new_with_schema(
+                    scan.projection
+                        .as_ref()
+                        .map(|projection| {
+                            projection
+                                .into_iter()
+                                .cloned()
+                                .map(|idx| {
+                                    Expr::Column(Column::new(
+                                        Some(scan_table_name.clone()),
+                                        source_schema.field(idx).name(),
+                                    ))
+                                })
+                                .collect()
+                        })
+                        .unwrap_or_else(|| {
+                            source_schema
+                                .fields()
+                                .iter()
+                                .map(|field| {
+                                    Expr::Column(Column::new(
+                                        Some(scan_table_name.clone()),
+                                        field.name(),
+                                    ))
+                                })
+                                .collect()
+                        }),
+                    Arc::new(new_scan),
+                    // Preserve a projected schema.
+                    scan.projected_schema,
+                )?);
+
+                Ok(Transformed::yes(new_plan))
             }
             LogicalPlan::Extension(extension_plan) => {
                 let prevent_cols =
@@ -1206,8 +1284,8 @@ mod tests {
     use datafusion_expr::logical_plan::table_scan;
     use datafusion_expr::{
         col, in_list, in_subquery, lit, ColumnarValue, Extension, ScalarUDF,
-        ScalarUDFImpl, Signature, TableSource, TableType, UserDefinedLogicalNodeCore,
-        Volatility,
+        ScalarUDFImpl, Signature, TableScan, TableSource, TableType,
+        UserDefinedLogicalNodeCore, Volatility,
     };
 
     use crate::optimizer::Optimizer;
@@ -2453,6 +2531,34 @@ mod tests {
     }
 
     #[test]
+    fn projection_is_updated_when_filter_becomes_unsupported() -> Result<()> {
+        let test_provider = PushDownProvider {
+            filter_support: TableProviderFilterPushDown::Unsupported,
+        };
+
+        let projeted_schema = test_provider.schema().project(&[0])?;
+        let table_scan = LogicalPlan::TableScan(TableScan {
+            table_name: "test".into(),
+            // Emulate that there were pushed filters but now
+            // provider cannot support it.
+            filters: vec![col("b").eq(lit(1i64))],
+            projected_schema: Arc::new(DFSchema::try_from(projeted_schema)?),
+            projection: Some(vec![0]),
+            source: Arc::new(test_provider),
+            fetch: None,
+        });
+
+        let plan = LogicalPlanBuilder::from(table_scan)
+            .filter(col("a").eq(lit(1i64)))?
+            .build()?;
+
+        let expected = "Projection: test.a\
+        \n  Filter: a = Int64(1) AND b = Int64(1)\
+        \n    TableScan: test projection=[a, b]";
+        assert_optimized_plan_eq(plan, expected)
+    }
+
+    #[test]
     fn filter_with_table_provider_exact() -> Result<()> {
         let plan = table_scan_with_pushdown_provider(TableProviderFilterPushDown::Exact)?;
 
@@ -2514,7 +2620,7 @@ mod tests {
             projected_schema: Arc::new(DFSchema::try_from(
                 (*test_provider.schema()).clone(),
             )?),
-            projection: Some(vec![0]),
+            projection: Some(vec![0, 1]),
             source: Arc::new(test_provider),
             fetch: None,
         });
@@ -2526,7 +2632,7 @@ mod tests {
 
         let expected = "Projection: a, b\
             \n  Filter: a = Int64(10) AND b > Int64(11)\
-            \n    TableScan: test projection=[a], partial_filters=[a = Int64(10), b > Int64(11)]";
+            \n    TableScan: test projection=[a, b], partial_filters=[a = Int64(10), b > Int64(11)]";
 
         assert_optimized_plan_eq(plan, expected)
     }
