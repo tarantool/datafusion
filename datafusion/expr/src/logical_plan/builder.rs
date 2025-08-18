@@ -194,12 +194,14 @@ impl LogicalPlanBuilder {
             }
         }
 
+        let mut has_placeholders = false;
         let empty_schema = DFSchema::empty();
         let mut field_types: Vec<DataType> = Vec::with_capacity(n_cols);
         for j in 0..n_cols {
             let mut common_type: Option<DataType> = None;
             for (i, row) in values.iter().enumerate() {
                 let value = &row[j];
+                has_placeholders |= value.has_placeholders();
                 let data_type = value.get_type(&empty_schema)?;
                 if data_type == DataType::Null {
                     continue;
@@ -238,7 +240,11 @@ impl LogicalPlanBuilder {
             .collect::<Vec<_>>();
         let dfschema = DFSchema::from_unqualified_fields(fields.into(), HashMap::new())?;
         let schema = DFSchemaRef::new(dfschema);
-        Ok(Self::new(LogicalPlan::Values(Values { schema, values })))
+        Ok(Self::new(LogicalPlan::Values(Values {
+            schema,
+            values,
+            has_placeholders,
+        })))
     }
 
     /// Convert a table provider into a builder with a TableScan

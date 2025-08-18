@@ -773,6 +773,7 @@ async fn roundtrip_values_no_columns() -> Result<()> {
     let plan = LogicalPlan::Values(Values {
         values: vec![vec![], vec![]], // two rows, no columns
         schema: DFSchemaRef::new(DFSchema::empty()),
+        has_placeholders: false,
     });
     roundtrip_logical_plan_with_ctx(plan, ctx).await?;
     Ok(())

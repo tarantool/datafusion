@@ -1374,6 +1374,26 @@ impl Expr {
         Expr::IsNotNull(Box::new(self))
     }
 
+    /// Return true if this expression is a placeholder
+    pub fn is_placeholder(&self) -> bool {
+        matches!(self, Self::Placeholder(_))
+    }
+
+    /// Return true if this expression has at least one placeholder
+    pub fn has_placeholders(&self) -> bool {
+        let mut has_placeholders = false;
+        self.apply(|expr| {
+            has_placeholders |= expr.is_placeholder();
+            Ok(if has_placeholders {
+                TreeNodeRecursion::Stop
+            } else {
+                TreeNodeRecursion::Continue
+            })
+        })
+        .unwrap();
+        has_placeholders
+    }
+
     /// Create a sort configuration from an existing expression.
     ///
     /// ```

@@ -557,12 +557,29 @@ impl LogicalPlan {
                         schema,
                     })
                 }),
-            LogicalPlan::Values(Values { schema, values }) => values
-                .into_iter()
-                .map_until_stop_and_collect(|value| {
-                    value.into_iter().map_until_stop_and_collect(&mut f)
-                })?
-                .update_data(|values| LogicalPlan::Values(Values { schema, values })),
+            LogicalPlan::Values(Values {
+                schema,
+                values,
+                has_placeholders: _,
+            }) => {
+                let mut has_placeholders = false;
+                values
+                    .into_iter()
+                    .map_until_stop_and_collect(|value| {
+                        value.into_iter().map_until_stop_and_collect(|expr| {
+                            let res = f(expr)?;
+                            has_placeholders |= res.data.has_placeholders();
+                            Ok(res)
+                        })
+                    })?
+                    .update_data(|values| {
+                        LogicalPlan::Values(Values {
+                            schema,
+                            values,
+                            has_placeholders,
+                        })
+                    })
+            }
             LogicalPlan::Filter(Filter {
                 predicate,
                 input,
