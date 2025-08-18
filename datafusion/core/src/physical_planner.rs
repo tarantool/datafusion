@@ -453,7 +453,11 @@ impl DefaultPhysicalPlanner {
                     .scan(session_state, projection.as_ref(), &filters, *fetch)
                     .await?
             }
-            LogicalPlan::Values(Values { values, schema }) => {
+            LogicalPlan::Values(Values {
+                values,
+                schema,
+                has_placeholders,
+            }) => {
                 let exec_schema = schema.as_ref().to_owned().into();
                 let exprs = values
                     .iter()
@@ -465,7 +469,11 @@ impl DefaultPhysicalPlanner {
                             .collect::<Result<Vec<Arc<dyn PhysicalExpr>>>>()
                     })
                     .collect::<Result<Vec<_>>>()?;
-                let value_exec = ValuesExec::try_new(SchemaRef::new(exec_schema), exprs)?;
+                let value_exec = ValuesExec::try_new(
+                    SchemaRef::new(exec_schema),
+                    exprs,
+                    *has_placeholders,
+                )?;
                 Arc::new(value_exec)
             }
             LogicalPlan::EmptyRelation(EmptyRelation {

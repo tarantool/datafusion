@@ -635,9 +635,17 @@ impl LogicalPlan {
             }) => Projection::try_new(expr, input).map(LogicalPlan::Projection),
             LogicalPlan::Dml(_) => Ok(self),
             LogicalPlan::Copy(_) => Ok(self),
-            LogicalPlan::Values(Values { schema, values }) => {
+            LogicalPlan::Values(Values {
+                schema,
+                values,
+                has_placeholders,
+            }) => {
                 // todo it isn't clear why the schema is not recomputed here
-                Ok(LogicalPlan::Values(Values { schema, values }))
+                Ok(LogicalPlan::Values(Values {
+                    schema,
+                    values,
+                    has_placeholders,
+                }))
             }
             LogicalPlan::Filter(Filter {
                 predicate,
@@ -842,12 +850,23 @@ impl LogicalPlan {
             }
             LogicalPlan::Values(Values { schema, .. }) => {
                 self.assert_no_inputs(inputs)?;
+                let mut has_placeholders = false;
+                let values = expr
+                    .chunks_exact(schema.fields().len())
+                    .map(|s| {
+                        s.iter()
+                            .map(|expr| {
+                                has_placeholders |= expr.has_placeholders();
+                                expr.clone()
+                            })
+                            .collect()
+                    })
+                    .collect();
+
                 Ok(LogicalPlan::Values(Values {
                     schema: Arc::clone(schema),
-                    values: expr
-                        .chunks_exact(schema.fields().len())
-                        .map(|s| s.to_vec())
-                        .collect(),
+                    values,
+                    has_placeholders,
                 }))
             }
             LogicalPlan::Filter { .. } => {
@@ -2064,6 +2083,8 @@ pub struct Values {
     pub schema: DFSchemaRef,
     /// Values
     pub values: Vec<Vec<Expr>>,
+    /// True if at least one of values is a placeholder.
+    pub has_placeholders: bool,
 }
 
 /// Evaluates an arbitrary list of expressions (essentially a

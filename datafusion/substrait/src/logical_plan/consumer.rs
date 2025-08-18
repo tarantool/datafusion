@@ -730,9 +730,12 @@ pub async fn from_substrait_rel(
                     })
                     .collect::<Result<_>>()?;
 
+                // All values are literals.
+                let has_placeholders = false;
                 Ok(LogicalPlan::Values(Values {
                     schema: DFSchemaRef::new(schema),
                     values,
+                    has_placeholders,
                 }))
             }
             Some(ReadType::LocalFiles(lf)) => {
@@ -961,7 +964,7 @@ fn compatible_nullabilities(
 }
 
 /// (Re)qualify the sides of a join if needed, i.e. if the columns from one side would otherwise
-/// conflict with the columns from the other.  
+/// conflict with the columns from the other.
 /// Substrait doesn't currently allow specifying aliases, neither for columns nor for tables. For
 /// Substrait the names don't matter since it only refers to columns by indices, however DataFusion
 /// requires columns to be uniquely identifiable, in some places (see e.g. DFSchema::check_names).
