@@ -22,7 +22,7 @@ use datafusion_common::{
     exec_datafusion_err, internal_err, plan_datafusion_err, Result, ScalarValue,
     TableReference, UnnestOptions,
 };
-use datafusion_expr::dml::InsertOp;
+
 use datafusion_expr::expr::{Alias, Placeholder, Sort};
 use datafusion_expr::expr::{Unnest, WildcardOptions};
 use datafusion_expr::{
@@ -230,11 +230,11 @@ impl From<protobuf::dml_node::Type> for WriteOp {
         match t {
             protobuf::dml_node::Type::Update => WriteOp::Update,
             protobuf::dml_node::Type::Delete => WriteOp::Delete,
-            protobuf::dml_node::Type::InsertAppend => WriteOp::Insert(InsertOp::Append),
-            protobuf::dml_node::Type::InsertOverwrite => {
-                WriteOp::Insert(InsertOp::Overwrite)
-            }
-            protobuf::dml_node::Type::InsertReplace => WriteOp::Insert(InsertOp::Replace),
+            // TODO: support for insert append
+            protobuf::dml_node::Type::InsertAppend => WriteOp::InsertInto,
+            protobuf::dml_node::Type::InsertOverwrite => WriteOp::InsertOverwrite,
+            // TODO: support for insert replace
+            protobuf::dml_node::Type::InsertReplace => WriteOp::InsertOverwrite,
             protobuf::dml_node::Type::Ctas => WriteOp::Ctas,
         }
     }

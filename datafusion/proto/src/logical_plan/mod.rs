@@ -21,8 +21,7 @@ use std::sync::Arc;
 
 use crate::protobuf::logical_plan_node::LogicalPlanType::CustomScan;
 use crate::protobuf::{
-    dml_node, ColumnUnnestListItem, ColumnUnnestListRecursion, CteWorkTableScanNode,
-    CustomTableScanNode, DmlNode, SortExprNodeCollection,
+    dml_node, CteWorkTableScanNode, CustomTableScanNode, DmlNode, SortExprNodeCollection,
 };
 use crate::{
     convert_required, into_required,
@@ -66,9 +65,9 @@ use datafusion_expr::{
         EmptyRelation, Extension, Join, JoinConstraint, Limit, Prepare, Projection,
         Repartition, Sort, SubqueryAlias, TableScan, Values, Window,
     },
-    AggregateUDF, ColumnUnnestList, DistinctOn, DmlStatement, DropView, Expr, FetchType,
-    LogicalPlan, LogicalPlanBuilder, RecursiveQuery, ScalarUDF, SkipType, SortExpr,
-    Statement, TableSource, Unnest, WindowUDF,
+    AggregateUDF, DistinctOn, DmlStatement, DropView, Expr, LogicalPlan,
+    LogicalPlanBuilder, RecursiveQuery, ScalarUDF, SortExpr, TableSource, Unnest,
+    WindowUDF,
 };
 
 use self::to_proto::{serialize_expr, serialize_exprs};
@@ -1695,7 +1694,7 @@ impl AsLogicalPlan for LogicalPlanNode {
             )),
             LogicalPlan::Dml(DmlStatement {
                 table_name,
-                target,
+                dst,
                 op,
                 input,
                 ..
@@ -1708,7 +1707,7 @@ impl AsLogicalPlan for LogicalPlanNode {
                         input: Some(Box::new(input)),
                         target: Some(Box::new(from_table_source(
                             table_name.clone(),
-                            Arc::clone(target),
+                            Arc::clone(dst),
                             extension_codec,
                         )?)),
                         table_name: Some(table_name.clone().into()),

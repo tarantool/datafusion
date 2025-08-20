@@ -20,7 +20,6 @@
 //! processes.
 
 use datafusion_common::{TableReference, UnnestOptions};
-use datafusion_expr::dml::InsertOp;
 use datafusion_expr::expr::{
     self, Alias, Between, BinaryExpr, Cast, GroupingSet, InList, Like, Placeholder,
     ScalarFunction, Unnest,
@@ -706,11 +705,8 @@ impl From<JoinConstraint> for protobuf::JoinConstraint {
 impl From<&WriteOp> for protobuf::dml_node::Type {
     fn from(t: &WriteOp) -> Self {
         match t {
-            WriteOp::Insert(InsertOp::Append) => protobuf::dml_node::Type::InsertAppend,
-            WriteOp::Insert(InsertOp::Overwrite) => {
-                protobuf::dml_node::Type::InsertOverwrite
-            }
-            WriteOp::Insert(InsertOp::Replace) => protobuf::dml_node::Type::InsertReplace,
+            WriteOp::InsertInto => protobuf::dml_node::Type::InsertAppend,
+            WriteOp::InsertOverwrite => protobuf::dml_node::Type::InsertOverwrite,
             WriteOp::Delete => protobuf::dml_node::Type::Delete,
             WriteOp::Update => protobuf::dml_node::Type::Update,
             WriteOp::Ctas => protobuf::dml_node::Type::Ctas,
