@@ -29,7 +29,7 @@ use crate::{
     },
 };
 
-use crate::protobuf::{proto_error, ToProtoError};
+use crate::protobuf::{dml_node, proto_error, DmlNode, ToProtoError};
 use arrow::datatypes::{DataType, Schema, SchemaRef};
 #[cfg(feature = "parquet")]
 use datafusion::datasource::file_format::parquet::ParquetFormat;
@@ -51,8 +51,8 @@ use datafusion::{
 };
 use datafusion_common::file_options::file_type::FileType;
 use datafusion_common::{
-    context, internal_datafusion_err, internal_err, not_impl_err, DataFusionError,
-    Result, TableReference,
+    context, internal_datafusion_err, internal_err, not_impl_err, plan_err,
+    DataFusionError, Result, TableReference, ToDFSchema,
 };
 use datafusion_expr::{
     dml,
@@ -65,7 +65,7 @@ use datafusion_expr::{
     DistinctOn, DropView, Expr, LogicalPlan, LogicalPlanBuilder, ScalarUDF, SortExpr,
     WindowUDF,
 };
-use datafusion_expr::{AggregateUDF, Unnest};
+use datafusion_expr::{AggregateUDF, DmlStatement, TableSource, Unnest};
 
 use self::to_proto::{serialize_expr, serialize_exprs};
 use crate::logical_plan::to_proto::serialize_sorts;
@@ -227,6 +227,45 @@ fn from_table_reference(
     })?;
 
     Ok(table_ref.clone().try_into()?)
+}
+
+/// Converts [LogicalPlan::TableScan] to [TableSource]
+/// method to be used to deserialize nodes
+/// serialized by [from_table_source]
+fn to_table_source(
+    node: &Option<Box<LogicalPlanNode>>,
+    ctx: &SessionContext,
+    extension_codec: &dyn LogicalExtensionCodec,
+) -> Result<Arc<dyn TableSource>> {
+    if let Some(node) = node {
+        match node.try_into_logical_plan(ctx, extension_codec)? {
+            LogicalPlan::TableScan(TableScan { source, .. }) => Ok(source),
+            _ => plan_err!("expected TableScan node"),
+        }
+    } else {
+        plan_err!("LogicalPlanNode should be provided")
+    }
+}
+
+/// converts [TableSource] to [LogicalPlan::TableScan]
+/// using [LogicalPlan::TableScan] was the best approach to
+/// serialize [TableSource] to [LogicalPlan::TableScan]
+fn from_table_source(
+    table_name: TableReference,
+    target: Arc<dyn TableSource>,
+    extension_codec: &dyn LogicalExtensionCodec,
+) -> Result<LogicalPlanNode> {
+    let projected_schema = target.schema().to_dfschema_ref()?;
+    let r = LogicalPlan::TableScan(TableScan {
+        table_name,
+        source: target,
+        projection: None,
+        projected_schema,
+        filters: vec![],
+        fetch: None,
+    });
+
+    LogicalPlanNode::try_from_logical_plan(&r, extension_codec)
 }
 
 impl AsLogicalPlan for LogicalPlanNode {
@@ -880,6 +919,14 @@ impl AsLogicalPlan for LogicalPlanNode {
                     options: into_required!(unnest.options)?,
                 }))
             }
+            LogicalPlanType::Dml(dml_node) => Ok(LogicalPlan::Dml(
+                datafusion::logical_expr::DmlStatement::new(
+                    from_table_reference(dml_node.table_name.as_ref(), "DML ")?,
+                    to_table_source(&dml_node.target, ctx, extension_codec)?,
+                    dml_node.dml_type().into(),
+                    Arc::new(into_logical_plan!(dml_node.input, ctx, extension_codec)?),
+                ),
+            )),
         }
     }
 
@@ -1055,15 +1102,14 @@ impl AsLogicalPlan for LogicalPlanNode {
                 }
             }
             LogicalPlan::Projection(Projection { expr, input, .. }) => {
+                let input = protobuf::LogicalPlanNode::try_from_logical_plan(
+                    input.as_ref(),
+                    extension_codec,
+                )?;
                 Ok(protobuf::LogicalPlanNode {
                     logical_plan_type: Some(LogicalPlanType::Projection(Box::new(
                         protobuf::ProjectionNode {
-                            input: Some(Box::new(
-                                protobuf::LogicalPlanNode::try_from_logical_plan(
-                                    input.as_ref(),
-                                    extension_codec,
-                                )?,
-                            )),
+                            input: Some(Box::new(input)),
                             expr: serialize_exprs(expr, extension_codec)?,
                             optional_alias: None,
                         },
@@ -1593,9 +1639,29 @@ impl AsLogicalPlan for LogicalPlanNode {
             LogicalPlan::Statement(_) => Err(proto_error(
                 "LogicalPlan serde is not yet implemented for Statement",
             )),
-            LogicalPlan::Dml(_) => Err(proto_error(
-                "LogicalPlan serde is not yet implemented for Dml",
-            )),
+            LogicalPlan::Dml(DmlStatement {
+                table_name,
+                dst,
+                op,
+                input,
+                ..
+            }) => {
+                let input =
+                    LogicalPlanNode::try_from_logical_plan(input, extension_codec)?;
+                let dml_type: dml_node::Type = op.into();
+                Ok(LogicalPlanNode {
+                    logical_plan_type: Some(LogicalPlanType::Dml(Box::new(DmlNode {
+                        input: Some(Box::new(input)),
+                        target: Some(Box::new(from_table_source(
+                            table_name.clone(),
+                            Arc::clone(dst),
+                            extension_codec,
+                        )?)),
+                        table_name: Some(table_name.clone().into()),
+                        dml_type: dml_type.into(),
+                    }))),
+                })
+            }
             LogicalPlan::Copy(dml::CopyTo {
                 input,
                 output_url,

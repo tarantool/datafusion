@@ -24,6 +24,7 @@ use datafusion_expr::expr::{
     self, Alias, Between, BinaryExpr, Cast, GroupingSet, InList, Like, Placeholder,
     ScalarFunction, Unnest,
 };
+use datafusion_expr::WriteOp;
 use datafusion_expr::{
     logical_plan::PlanType, logical_plan::StringifiedPlan, BuiltInWindowFunction, Expr,
     JoinConstraint, JoinType, SortExpr, TryCast, WindowFrame, WindowFrameBound,
@@ -697,6 +698,18 @@ impl From<JoinConstraint> for protobuf::JoinConstraint {
         match t {
             JoinConstraint::On => protobuf::JoinConstraint::On,
             JoinConstraint::Using => protobuf::JoinConstraint::Using,
+        }
+    }
+}
+
+impl From<&WriteOp> for protobuf::dml_node::Type {
+    fn from(t: &WriteOp) -> Self {
+        match t {
+            WriteOp::InsertOverwrite => protobuf::dml_node::Type::InsertOverwrite,
+            WriteOp::InsertInto => protobuf::dml_node::Type::InsertAppend,
+            WriteOp::Delete => protobuf::dml_node::Type::Delete,
+            WriteOp::Update => protobuf::dml_node::Type::Update,
+            WriteOp::Ctas => protobuf::dml_node::Type::Ctas,
         }
     }
 }

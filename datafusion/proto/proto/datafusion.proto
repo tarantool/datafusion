@@ -59,6 +59,11 @@ message LogicalPlanNode {
     DistinctOnNode distinct_on = 28;
     CopyToNode copy_to = 29;
     UnnestNode unnest = 30;
+    // Gap in numeration here to accommodate changes in upstream
+    // and make it easier to pull changes in the future
+    // RecursiveQueryNode recursive_query = 31;
+    // CteWorkTableScanNode cte_work_table_scan = 32;
+    DmlNode dml = 33;
   }
 }
 
@@ -258,6 +263,22 @@ message CopyToNode {
   string output_url = 2;
   bytes file_type = 3;
   repeated string partition_by = 7;
+}
+
+message DmlNode{
+   enum Type {
+    UPDATE = 0;
+    DELETE = 1;
+    CTAS = 2;
+    INSERT_APPEND = 3;
+    INSERT_OVERWRITE = 4;
+    INSERT_REPLACE = 5;
+
+  }
+  Type dml_type = 1;
+  LogicalPlanNode input = 2;
+  TableReference table_name = 3;
+  LogicalPlanNode target = 5;
 }
 
 message UnnestNode {
