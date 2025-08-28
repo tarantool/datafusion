@@ -24,7 +24,6 @@ use datafusion_common::{
 };
 use datafusion_expr::expr::{Alias, Placeholder, Sort};
 use datafusion_expr::expr::{Unnest, WildcardOptions};
-use datafusion_expr::ExprFunctionExt;
 use datafusion_expr::{
     expr::{self, InList, WindowFunction},
     logical_plan::{PlanType, StringifiedPlan},
@@ -33,6 +32,7 @@ use datafusion_expr::{
     JoinConstraint, JoinType, Like, Operator, TryCast, WindowFrame, WindowFrameBound,
     WindowFrameUnits,
 };
+use datafusion_expr::{ExprFunctionExt, WriteOp};
 use datafusion_proto_common::{from_proto::FromOptionalField, FromProtoError as Error};
 
 use crate::protobuf::plan_type::PlanTypeEnum::{
@@ -220,6 +220,19 @@ impl From<protobuf::JoinConstraint> for JoinConstraint {
         match t {
             protobuf::JoinConstraint::On => JoinConstraint::On,
             protobuf::JoinConstraint::Using => JoinConstraint::Using,
+        }
+    }
+}
+
+impl From<protobuf::dml_node::Type> for WriteOp {
+    fn from(t: protobuf::dml_node::Type) -> Self {
+        match t {
+            protobuf::dml_node::Type::Update => WriteOp::Update,
+            protobuf::dml_node::Type::Delete => WriteOp::Delete,
+            protobuf::dml_node::Type::InsertAppend => WriteOp::InsertInto,
+            protobuf::dml_node::Type::InsertOverwrite => WriteOp::InsertOverwrite,
+            protobuf::dml_node::Type::InsertReplace => WriteOp::InsertOverwrite,
+            protobuf::dml_node::Type::Ctas => WriteOp::Ctas,
         }
     }
 }
