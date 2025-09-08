@@ -51,7 +51,7 @@ impl UnKnownColumn {
 
 impl std::fmt::Display for UnKnownColumn {
     fn fmt(&self, f: &mut std::fmt::Formatter) -> std::fmt::Result {
-        write!(f, "{}", self.name)
+        write!(f, "?{}", self.name)
     }
 }
 
