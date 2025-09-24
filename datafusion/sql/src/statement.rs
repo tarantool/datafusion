@@ -568,12 +568,8 @@ impl<S: ContextProvider> SqlToRel<'_, S> {
                     plan_err!("Delete-order-by clause not yet supported")?;
                 }
 
-                if limit.is_some() {
-                    plan_err!("Delete-limit clause not yet supported")?;
-                }
-
                 let table_name = self.get_delete_target(from)?;
-                self.delete_to_plan(table_name, selection)
+                self.delete_to_plan(table_name, selection, limit)
             }
 
             Statement::StartTransaction {
@@ -1223,6 +1219,7 @@ impl<S: ContextProvider> SqlToRel<'_, S> {
         &self,
         table_name: ObjectName,
         predicate_expr: Option<SQLExpr>,
+        limit: Option<SQLExpr>
     ) -> Result<LogicalPlan> {
         // Do a table lookup to verify the table exists
         let table_ref = self.object_name_to_table_reference(table_name.clone())?;
@@ -1237,7 +1234,7 @@ impl<S: ContextProvider> SqlToRel<'_, S> {
         .build()?;
         let mut planner_context = PlannerContext::new();
 
-        let source = match predicate_expr {
+        let mut source = match predicate_expr {
             None => scan,
             Some(predicate_expr) => {
                 let filter_expr =
@@ -1253,6 +1250,14 @@ impl<S: ContextProvider> SqlToRel<'_, S> {
                 LogicalPlan::Filter(Filter::try_new(filter_expr, Arc::new(scan))?)
             }
         };
+
+        if let Some(limit_expr) = limit {        
+            let limit = (limit_expr != SQLExpr::Value(Value::Null))
+                .then(|| self.get_constant_usize_result(limit_expr, source.schema(), "LIMIT"))
+                .transpose()?;
+
+            source = LogicalPlanBuilder::from(source).limit(0, limit)?.build()?
+        }
 
         let plan = LogicalPlan::Dml(DmlStatement::new(
             table_ref,

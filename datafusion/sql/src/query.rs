@@ -86,15 +86,7 @@ impl<S: ContextProvider> SqlToRel<'_, S> {
         }
 
         let skip = match skip {
-            Some(skip_expr) => {
-                let expr = self.sql_to_expr(
-                    skip_expr.value,
-                    input.schema(),
-                    &mut PlannerContext::new(),
-                )?;
-                let n = get_constant_result(&expr, "OFFSET")?;
-                convert_usize_with_check(n, "OFFSET")
-            }
+            Some(skip_expr) => self.get_constant_usize_result(skip_expr.value, input.schema(), "OFFSET"),
             _ => Ok(0),
         }?;
 
@@ -102,13 +94,7 @@ impl<S: ContextProvider> SqlToRel<'_, S> {
             Some(limit_expr)
                 if limit_expr != sqlparser::ast::Expr::Value(Value::Null) =>
             {
-                let expr = self.sql_to_expr(
-                    limit_expr,
-                    input.schema(),
-                    &mut PlannerContext::new(),
-                )?;
-                let n = get_constant_result(&expr, "LIMIT")?;
-                Some(convert_usize_with_check(n, "LIMIT")?)
+                Some(self.get_constant_usize_result(limit_expr, input.schema(), "LIMIT")?)
             }
             _ => None,
         };
@@ -155,6 +141,28 @@ impl<S: ContextProvider> SqlToRel<'_, S> {
             ))),
             _ => Ok(plan),
         }
+    }
+
+    /// Retrieves the constant usize result of an SQL expression, evaluating it if possible.
+    ///
+    /// This function takes an SQL expression, a related scheme and an argument name as input and returns
+    /// a `Result<usize>` indicating either the constant result of the expression or an
+    /// error if the expression cannot be evaluated.
+    ///
+    /// # Arguments
+    ///
+    /// * `expr` - An `SQLExpr` representing the expression to evaluate.
+    /// * `schema` - A related DataFusion schema to apply while converting an `expr` into a logical expression.
+    /// * `arg_name` - The name of the argument for error messages.
+    ///
+    /// # Returns
+    ///
+    /// * `Result<usize>` - An `Ok` variant containing the constant result if evaluation is successful,
+    ///   or an `Err` variant containing an error message if evaluation fails.
+    pub(super) fn get_constant_usize_result(&self, expr: SQLExpr, schema: &datafusion_common::DFSchema, arg_name: &str) -> Result<usize> {
+        let expr = self.sql_to_expr(expr, schema, &mut PlannerContext::new())?;
+        let value = get_constant_result(&expr, arg_name)?;
+        convert_usize_with_check(value, arg_name)
     }
 }
 
