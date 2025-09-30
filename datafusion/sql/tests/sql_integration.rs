@@ -622,6 +622,18 @@ Dml: op=[Delete] table=[person]
 }
 
 #[test]
+fn plan_delete_limited() {
+    let sql = "delete from person limit 2";
+    let plan = r#"
+Dml: op=[Delete] table=[person]
+  Limit: skip=0, fetch=2
+    TableScan: person
+    "#
+    .trim();
+    quick_test(sql, plan);
+}
+
+#[test]
 fn select_column_does_not_exist() {
     let sql = "SELECT doesnotexist FROM person";
     let err = logical_plan(sql).expect_err("query should have failed");
