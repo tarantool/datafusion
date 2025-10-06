@@ -24,7 +24,7 @@ use datafusion::arrow::record_batch::RecordBatch;
 use datafusion::datasource::function::TableFunctionImpl;
 use datafusion::datasource::TableProvider;
 use datafusion::error::Result;
-use datafusion::execution::TaskContext;
+use datafusion::execution::{SessionState, TaskContext};
 use datafusion::physical_plan::memory::MemoryExec;
 use datafusion::physical_plan::{collect, ExecutionPlan};
 use datafusion::prelude::SessionContext;
@@ -194,7 +194,11 @@ impl SimpleCsvTable {
 struct SimpleCsvTableFunc {}
 
 impl TableFunctionImpl for SimpleCsvTableFunc {
-    fn call(&self, exprs: &[Expr]) -> Result<Arc<dyn TableProvider>> {
+    fn call(
+        &self,
+        _state: &SessionState,
+        exprs: &[Expr],
+    ) -> Result<Arc<dyn TableProvider>> {
         let mut new_exprs = vec![];
         let mut filepath = String::new();
         for expr in exprs {
