@@ -562,6 +562,7 @@ In the `call` method, you parse the input `Expr`s and return a `TableProvider`. 
 ```rust
 use datafusion::common::plan_err;
 use datafusion::datasource::function::TableFunctionImpl;
+use datafusion::execution::SessionState;
 // Other imports here
 
 /// A table function that returns a table provider with the value as a single column
@@ -569,7 +570,10 @@ use datafusion::datasource::function::TableFunctionImpl;
 pub struct EchoFunction {}
 
 impl TableFunctionImpl for EchoFunction {
-    fn call(&self, exprs: &[Expr]) -> Result<Arc<dyn TableProvider>> {
+    fn call(&self, 
+        _state: &SessionState,
+        exprs: &[Expr],
+    ) -> Result<Arc<dyn TableProvider>> {
         let Some(Expr::Literal(ScalarValue::Int64(Some(value)))) = exprs.get(0) else {
             return plan_err!("First argument must be an integer");
         };

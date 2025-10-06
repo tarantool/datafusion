@@ -17,6 +17,8 @@
 
 //! A table that uses a function to generate data
 
+use crate::execution::SessionState;
+
 use super::TableProvider;
 
 use datafusion_common::Result;
@@ -27,7 +29,8 @@ use std::sync::Arc;
 /// A trait for table function implementations
 pub trait TableFunctionImpl: Sync + Send {
     /// Create a table provider
-    fn call(&self, args: &[Expr]) -> Result<Arc<dyn TableProvider>>;
+    fn call(&self, state: &SessionState, args: &[Expr])
+        -> Result<Arc<dyn TableProvider>>;
 }
 
 /// A table that uses a function to generate data
@@ -55,7 +58,11 @@ impl TableFunction {
     }
 
     /// Get the function implementation and generate a table
-    pub fn create_table_provider(&self, args: &[Expr]) -> Result<Arc<dyn TableProvider>> {
-        self.fun.call(args)
+    pub fn create_table_provider(
+        &self,
+        state: &SessionState,
+        args: &[Expr],
+    ) -> Result<Arc<dyn TableProvider>> {
+        self.fun.call(state, args)
     }
 }

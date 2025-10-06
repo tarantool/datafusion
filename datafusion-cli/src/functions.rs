@@ -27,6 +27,7 @@ use datafusion::common::{plan_err, Column};
 use datafusion::datasource::function::TableFunctionImpl;
 use datafusion::datasource::TableProvider;
 use datafusion::error::Result;
+use datafusion::execution::SessionState;
 use datafusion::logical_expr::Expr;
 use datafusion::physical_plan::memory::MemoryExec;
 use datafusion::physical_plan::ExecutionPlan;
@@ -317,7 +318,11 @@ fn fixed_len_byte_array_to_string(val: Option<&FixedLenByteArray>) -> Option<Str
 pub struct ParquetMetadataFunc {}
 
 impl TableFunctionImpl for ParquetMetadataFunc {
-    fn call(&self, exprs: &[Expr]) -> Result<Arc<dyn TableProvider>> {
+    fn call(
+        &self,
+        _state: &SessionState,
+        exprs: &[Expr],
+    ) -> Result<Arc<dyn TableProvider>> {
         let filename = match exprs.first() {
             Some(Expr::Literal(ScalarValue::Utf8(Some(s)))) => s, // single quote: parquet_metadata('x.parquet')
             Some(Expr::Column(Column { name, .. })) => name, // double quote: parquet_metadata("x.parquet")

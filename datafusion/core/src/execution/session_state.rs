@@ -1543,7 +1543,7 @@ impl ContextProvider for SessionContextProvider<'_> {
             .get(name)
             .cloned()
             .ok_or_else(|| plan_datafusion_err!("table function '{name}' not found"))?;
-        let provider = tbl_func.create_table_provider(&args)?;
+        let provider = tbl_func.create_table_provider(self.state, &args)?;
 
         Ok(provider_as_source(provider))
     }

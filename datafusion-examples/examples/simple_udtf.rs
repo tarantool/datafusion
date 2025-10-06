@@ -25,6 +25,7 @@ use datafusion::datasource::function::TableFunctionImpl;
 use datafusion::datasource::TableProvider;
 use datafusion::error::Result;
 use datafusion::execution::context::ExecutionProps;
+use datafusion::execution::SessionState;
 use datafusion::physical_plan::memory::MemoryExec;
 use datafusion::physical_plan::ExecutionPlan;
 use datafusion::prelude::SessionContext;
@@ -130,7 +131,11 @@ impl TableProvider for LocalCsvTable {
 struct LocalCsvTableFunc {}
 
 impl TableFunctionImpl for LocalCsvTableFunc {
-    fn call(&self, exprs: &[Expr]) -> Result<Arc<dyn TableProvider>> {
+    fn call(
+        &self,
+        _state: &SessionState,
+        exprs: &[Expr],
+    ) -> Result<Arc<dyn TableProvider>> {
         let Some(Expr::Literal(ScalarValue::Utf8(Some(ref path)))) = exprs.first() else {
             return plan_err!("read_csv requires at least one string argument");
         };
