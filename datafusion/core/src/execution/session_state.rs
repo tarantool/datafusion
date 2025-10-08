@@ -280,7 +280,7 @@ impl SessionState {
         SessionStateBuilder::new()
             .with_config(config)
             .with_runtime_env(runtime)
-            .with_catalog_list(catalog_list)
+            .with_catalog_list(Some(catalog_list))
             .with_default_features()
             .build()
     }
@@ -296,7 +296,7 @@ impl SessionState {
         SessionStateBuilder::new()
             .with_config(config)
             .with_runtime_env(runtime)
-            .with_catalog_list(catalog_list)
+            .with_catalog_list(Some(catalog_list))
             .with_default_features()
             .build()
     }
@@ -1140,9 +1140,9 @@ impl SessionStateBuilder {
     /// Set the [`CatalogProviderList`]
     pub fn with_catalog_list(
         mut self,
-        catalog_list: Arc<dyn CatalogProviderList>,
+        catalog_list: Option<Arc<dyn CatalogProviderList>>,
     ) -> Self {
-        self.catalog_list = Some(catalog_list);
+        self.catalog_list = catalog_list;
         self
     }
 
@@ -1876,7 +1876,7 @@ mod tests {
         let table = MemTable::try_new(batch.schema(), vec![vec![batch]])?;
 
         let session_state = SessionStateBuilder::new()
-            .with_catalog_list(Arc::new(MemoryCatalogProviderList::new()))
+            .with_catalog_list(Some(Arc::new(MemoryCatalogProviderList::new())))
             .build();
         let table_ref = session_state.resolve_table_ref("employee").to_string();
         session_state
