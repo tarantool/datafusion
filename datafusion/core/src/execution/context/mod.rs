@@ -397,7 +397,7 @@ impl SessionContext {
             Arc::clone(&factory) as Arc<dyn UrlTableFactory>,
         ));
         let new_state = SessionStateBuilder::new_from_existing(self.state())
-            .with_catalog_list(catalog_list)
+            .with_catalog_list(Some(catalog_list))
             .build();
         let ctx = SessionContext::new_with_state(new_state);
         factory.session_store().with_state(ctx.state_weak_ref());
