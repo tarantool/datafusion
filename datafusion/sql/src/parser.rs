@@ -279,15 +279,14 @@ impl<'a> DFParser<'a> {
         sql: &str,
         dialect: &'a dyn Dialect,
     ) -> Result<Self, ParserError> {
-        let tokens = Tokenizer::new(dialect, sql).into_tokens().collect::<Result<_, _>>()?;
+        let tokens = Tokenizer::new(dialect, sql)
+            .into_tokens()
+            .collect::<Result<_, _>>()?;
         Ok(Self::from_dialect_and_tokens(dialect, tokens))
     }
 
     /// Create a new parser from specified dialect and tokens.
-    pub fn from_dialect_and_tokens(
-        dialect: &'a dyn Dialect,
-        tokens: Vec<Token>,
-    ) -> Self {
+    pub fn from_dialect_and_tokens(dialect: &'a dyn Dialect, tokens: Vec<Token>) -> Self {
         let parser = Parser::new(dialect).with_tokens(tokens);
         DFParser { parser }
     }
