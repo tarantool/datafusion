@@ -29,6 +29,7 @@ use parking_lot::RwLock;
 use crate::common::spawn_buffered;
 use crate::execution_plan::{
     Boundedness, CardinalityEffect, EmissionType, ReplacePhysicalExpr,
+    has_same_children_properties,
 };
 use crate::expressions::PhysicalSortExpr;
 use crate::filter_pushdown::{
@@ -953,7 +954,7 @@ pub struct SortExec {
     /// Normalized common sort prefix between the input and the sort expressions (only used with fetch)
     common_sort_prefix: Vec<PhysicalSortExpr>,
     /// Cache holding plan properties like equivalences, output partitioning etc.
-    cache: PlanProperties,
+    cache: Arc<PlanProperties>,
     /// Filter matching the state of the sort for dynamic filter pushdown.
     /// If `fetch` is `Some`, this will also be set and a TopK operator may be used.
     /// If `fetch` is `None`, this will be `None`.
@@ -975,7 +976,7 @@ impl SortExec {
             preserve_partitioning,
             fetch: None,
             common_sort_prefix: sort_prefix,
-            cache,
+            cache: Arc::new(cache),
             filter: None,
         }
     }
@@ -994,12 +995,8 @@ impl SortExec {
     /// input partitions producing a single, sorted partition.
     pub fn with_preserve_partitioning(mut self, preserve_partitioning: bool) -> Self {
         self.preserve_partitioning = preserve_partitioning;
-        self.cache = self
-            .cache
-            .with_partitioning(Self::output_partitioning_helper(
-                &self.input,
-                self.preserve_partitioning,
-            ));
+        Arc::make_mut(&mut self.cache).partitioning =
+            Self::output_partitioning_helper(&self.input, self.preserve_partitioning);
         self
     }
 
@@ -1023,7 +1020,7 @@ impl SortExec {
             preserve_partitioning: self.preserve_partitioning,
             common_sort_prefix: self.common_sort_prefix.clone(),
             fetch: self.fetch,
-            cache: self.cache.clone(),
+            cache: Arc::clone(&self.cache),
             filter: self.filter.clone(),
         }
     }
@@ -1036,12 +1033,12 @@ impl SortExec {
     /// operation since rows that are not going to be included
     /// can be dropped.
     pub fn with_fetch(&self, fetch: Option<usize>) -> Self {
-        let mut cache = self.cache.clone();
+        let mut cache = PlanProperties::clone(&self.cache);
         // If the SortExec can emit incrementally (that means the sort requirements
         // and properties of the input match), the SortExec can generate its result
         // without scanning the entire input when a fetch value exists.
         let is_pipeline_friendly = matches!(
-            self.cache.emission_type,
+            cache.emission_type,
             EmissionType::Incremental | EmissionType::Both
         );
         if fetch.is_some() && is_pipeline_friendly {
@@ -1053,7 +1050,7 @@ impl SortExec {
         });
         let mut new_sort = self.cloned();
         new_sort.fetch = fetch;
-        new_sort.cache = cache;
+        new_sort.cache = cache.into();
         new_sort.filter = filter;
         new_sort
     }
@@ -1208,7 +1205,7 @@ impl ExecutionPlan for SortExec {
         self
     }
 
-    fn properties(&self) -> &PlanProperties {
+    fn properties(&self) -> &Arc<PlanProperties> {
         &self.cache
     }
 
@@ -1237,14 +1234,17 @@ impl ExecutionPlan for SortExec {
         let mut new_sort = self.cloned();
         assert_eq!(children.len(), 1, "SortExec should have exactly one child");
         new_sort.input = Arc::clone(&children[0]);
-        // Recompute the properties based on the new input since they may have changed
-        let (cache, sort_prefix) = Self::compute_properties(
-            &new_sort.input,
-            new_sort.expr.clone(),
-            new_sort.preserve_partitioning,
-        )?;
-        new_sort.cache = cache;
-        new_sort.common_sort_prefix = sort_prefix;
+
+        if !has_same_children_properties(&self, &children)? {
+            // Recompute the properties based on the new input since they may have changed
+            let (cache, sort_prefix) = Self::compute_properties(
+                &new_sort.input,
+                new_sort.expr.clone(),
+                new_sort.preserve_partitioning,
+            )?;
+            new_sort.cache = Arc::new(cache);
+            new_sort.common_sort_prefix = sort_prefix;
+        }
 
         Ok(Arc::new(new_sort))
     }
@@ -1509,7 +1509,7 @@ mod tests {
     pub struct SortedUnboundedExec {
         schema: Schema,
         batch_size: u64,
-        cache: PlanProperties,
+        cache: Arc<PlanProperties>,
     }
 
     impl DisplayAs for SortedUnboundedExec {
@@ -1549,7 +1549,7 @@ mod tests {
             self
         }
 
-        fn properties(&self) -> &PlanProperties {
+        fn properties(&self) -> &Arc<PlanProperties> {
             &self.cache
         }
 
@@ -2302,7 +2302,9 @@ mod tests {
         let source = SortedUnboundedExec {
             schema: schema.clone(),
             batch_size: 2,
-            cache: SortedUnboundedExec::compute_properties(Arc::new(schema.clone())),
+            cache: Arc::new(SortedUnboundedExec::compute_properties(Arc::new(
+                schema.clone(),
+            ))),
         };
         let mut plan = SortExec::new(
             [PhysicalSortExpr::new_default(Arc::new(Column::new(

@@ -32,9 +32,11 @@ use std::sync::Arc;
 use std::task::{Context, Poll};
 use std::vec;
 
+use crate::check_if_same_properties;
 use crate::common::SharedMemoryReservation;
 use crate::execution_plan::{
     ReplacePhysicalExpr, boundedness_from_children, emission_type_from_children,
+    has_same_children_properties,
 };
 use crate::joins::stream_join_utils::{
     PruningJoinHashMap, SortedFilterExpr, StreamJoinMetrics,
@@ -200,7 +202,7 @@ pub struct SymmetricHashJoinExec {
     /// Partition Mode
     mode: StreamJoinPartitionMode,
     /// Cache holding plan properties like equivalences, output partitioning etc.
-    cache: PlanProperties,
+    cache: Arc<PlanProperties>,
 }
 
 impl SymmetricHashJoinExec {
@@ -256,7 +258,7 @@ impl SymmetricHashJoinExec {
             left_sort_exprs,
             right_sort_exprs,
             mode,
-            cache,
+            cache: Arc::new(cache),
         })
     }
 
@@ -363,6 +365,20 @@ impl SymmetricHashJoinExec {
         }
         Ok(false)
     }
+
+    fn with_new_children_and_same_properties(
+        &self,
+        mut children: Vec<Arc<dyn ExecutionPlan>>,
+    ) -> Self {
+        let left = children.swap_remove(0);
+        let right = children.swap_remove(0);
+        Self {
+            left,
+            right,
+            metrics: ExecutionPlanMetricsSet::new(),
+            ..Self::clone(self)
+        }
+    }
 }
 
 impl DisplayAs for SymmetricHashJoinExec {
@@ -414,7 +430,7 @@ impl ExecutionPlan for SymmetricHashJoinExec {
         self
     }
 
-    fn properties(&self) -> &PlanProperties {
+    fn properties(&self) -> &Arc<PlanProperties> {
         &self.cache
     }
 
@@ -456,6 +472,7 @@ impl ExecutionPlan for SymmetricHashJoinExec {
         self: Arc<Self>,
         children: Vec<Arc<dyn ExecutionPlan>>,
     ) -> Result<Arc<dyn ExecutionPlan>> {
+        check_if_same_properties!(self, children);
         Ok(Arc::new(SymmetricHashJoinExec::try_new(
             Arc::clone(&children[0]),
             Arc::clone(&children[1]),

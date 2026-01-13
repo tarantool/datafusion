@@ -31,6 +31,7 @@ use super::utils::{
 use crate::common::can_project;
 use crate::execution_plan::{
     EmissionType, ReplacePhysicalExpr, boundedness_from_children,
+    has_same_children_properties,
 };
 use crate::joins::SharedBitmapBuilder;
 use crate::joins::utils::{
@@ -48,6 +49,7 @@ use crate::projection::{
 use crate::{
     DisplayAs, DisplayFormatType, Distribution, ExecutionPlan, ExecutionPlanProperties,
     PlanProperties, RecordBatchStream, SendableRecordBatchStream,
+    check_if_same_properties,
 };
 
 use arrow::array::{
@@ -203,7 +205,7 @@ pub struct NestedLoopJoinExec {
     /// Execution metrics
     metrics: ExecutionPlanMetricsSet,
     /// Cache holding plan properties like equivalences, output partitioning etc.
-    cache: PlanProperties,
+    cache: Arc<PlanProperties>,
 }
 
 /// Helps to build [`NestedLoopJoinExec`].
@@ -281,7 +283,7 @@ impl NestedLoopJoinExecBuilder {
             column_indices,
             projection,
             metrics: Default::default(),
-            cache,
+            cache: Arc::new(cache),
         })
     }
 }
@@ -467,6 +469,27 @@ impl NestedLoopJoinExec {
 
         Ok(plan)
     }
+
+    fn with_new_children_and_same_properties(
+        &self,
+        mut children: Vec<Arc<dyn ExecutionPlan>>,
+    ) -> Self {
+        let left = children.swap_remove(0);
+        let right = children.swap_remove(0);
+
+        Self {
+            left,
+            right,
+            metrics: ExecutionPlanMetricsSet::new(),
+            build_side_data: Default::default(),
+            cache: Arc::clone(&self.cache),
+            filter: self.filter.clone(),
+            join_type: self.join_type,
+            join_schema: Arc::clone(&self.join_schema),
+            column_indices: self.column_indices.clone(),
+            projection: self.projection.clone(),
+        }
+    }
 }
 
 impl DisplayAs for NestedLoopJoinExec {
@@ -521,7 +544,7 @@ impl ExecutionPlan for NestedLoopJoinExec {
         self
     }
 
-    fn properties(&self) -> &PlanProperties {
+    fn properties(&self) -> &Arc<PlanProperties> {
         &self.cache
     }
 
@@ -544,6 +567,7 @@ impl ExecutionPlan for NestedLoopJoinExec {
         self: Arc<Self>,
         children: Vec<Arc<dyn ExecutionPlan>>,
     ) -> Result<Arc<dyn ExecutionPlan>> {
+        check_if_same_properties!(self, children);
         Ok(Arc::new(
             NestedLoopJoinExecBuilder::new(
                 Arc::clone(&children[0]),
