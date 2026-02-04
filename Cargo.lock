@@ -2923,7 +2923,7 @@ checksum = "0ce92ff622d6dadf7349484f42c93271a0d49b7cc4d466a936405bacbe10aa78"
 dependencies = [
  "cfg-if",
  "rustix",
- "windows-sys 0.59.0",
+ "windows-sys 0.52.0",
 ]
 
 [[package]]
@@ -5705,8 +5705,7 @@ dependencies = [
 [[package]]
 name = "sqlparser"
 version = "0.60.0"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "505aa16b045c4c1375bf5f125cce3813d0176325bfe9ffc4a903f423de7774ff"
+source = "git+https://github.com/tarantool/datafusion-sqlparser-rs.git?branch=askalt%2Fbump-candidate#c27c2c7a97544e43f6a15ea1090c970f99c647b6"
 dependencies = [
  "log",
  "recursive",
@@ -5716,8 +5715,7 @@ dependencies = [
 [[package]]
 name = "sqlparser_derive"
 version = "0.4.0"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "028e551d5e270b31b9f3ea271778d9d827148d4287a5d96167b6bb9787f5cc38"
+source = "git+https://github.com/tarantool/datafusion-sqlparser-rs.git?branch=askalt%2Fbump-candidate#c27c2c7a97544e43f6a15ea1090c970f99c647b6"
 dependencies = [
  "proc-macro2",
  "quote",
@@ -5740,6 +5738,7 @@ dependencies = [
  "cfg-if",
  "libc",
  "psm",
+ "windows-sys 0.52.0",
  "windows-sys 0.59.0",
 ]
 

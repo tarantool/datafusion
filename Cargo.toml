@@ -275,3 +275,6 @@ incremental = false
 inherits = "release"
 debug = true
 strip = false
+
+[patch.crates-io]
+sqlparser = { git = "https://github.com/tarantool/datafusion-sqlparser-rs.git", branch = "askalt/bump-candidate" }
