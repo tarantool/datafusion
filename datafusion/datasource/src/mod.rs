@@ -44,6 +44,7 @@ pub mod sink;
 pub mod source;
 mod statistics;
 pub mod table_schema;
+pub mod values;
 
 #[cfg(test)]
 pub mod test_util;

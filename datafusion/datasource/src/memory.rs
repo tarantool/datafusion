@@ -27,11 +27,9 @@ use std::sync::Arc;
 use crate::sink::DataSink;
 use crate::source::{DataSource, DataSourceExec};
 
-use arrow::array::{RecordBatch, RecordBatchOptions};
-use arrow::datatypes::{Schema, SchemaRef};
-use datafusion_common::{
-    Result, ScalarValue, assert_or_internal_err, plan_err, project_schema,
-};
+use arrow::array::RecordBatch;
+use arrow::datatypes::SchemaRef;
+use datafusion_common::{Result, assert_or_internal_err, plan_err, project_schema};
 use datafusion_execution::TaskContext;
 use datafusion_physical_expr::equivalence::project_orderings;
 use datafusion_physical_expr::projection::ProjectionExprs;
@@ -42,8 +40,8 @@ use datafusion_physical_plan::projection::{
     all_alias_free_columns, new_projections_for_columns,
 };
 use datafusion_physical_plan::{
-    ColumnarValue, DisplayAs, DisplayFormatType, Partitioning, PhysicalExpr,
-    SendableRecordBatchStream, Statistics, common,
+    DisplayAs, DisplayFormatType, Partitioning, SendableRecordBatchStream, Statistics,
+    common,
 };
 
 use async_trait::async_trait;
@@ -283,61 +281,6 @@ impl MemorySourceConfig {
     ) -> Result<Arc<DataSourceExec>> {
         let source = Self::try_new(partitions, schema, projection)?;
         Ok(DataSourceExec::from_data_source(source))
-    }
-
-    /// Create a new execution plan from a list of constant values (`ValuesExec`)
-    #[expect(clippy::needless_pass_by_value)]
-    pub fn try_new_as_values(
-        schema: SchemaRef,
-        data: Vec<Vec<Arc<dyn PhysicalExpr>>>,
-    ) -> Result<Arc<DataSourceExec>> {
-        if data.is_empty() {
-            return plan_err!("Values list cannot be empty");
-        }
-
-        let n_row = data.len();
-        let n_col = schema.fields().len();
-
-        // We have this single row batch as a placeholder to satisfy evaluation argument
-        // and generate a single output row
-        let placeholder_schema = Arc::new(Schema::empty());
-        let placeholder_batch = RecordBatch::try_new_with_options(
-            Arc::clone(&placeholder_schema),
-            vec![],
-            &RecordBatchOptions::new().with_row_count(Some(1)),
-        )?;
-
-        // Evaluate each column
-        let arrays = (0..n_col)
-            .map(|j| {
-                (0..n_row)
-                    .map(|i| {
-                        let expr = &data[i][j];
-                        let result = expr.evaluate(&placeholder_batch)?;
-
-                        match result {
-                            ColumnarValue::Scalar(scalar) => Ok(scalar),
-                            ColumnarValue::Array(array) if array.len() == 1 => {
-                                ScalarValue::try_from_array(&array, 0)
-                            }
-                            ColumnarValue::Array(_) => {
-                                plan_err!("Cannot have array values in a values list")
-                            }
-                        }
-                    })
-                    .collect::<Result<Vec<_>>>()
-                    .and_then(ScalarValue::iter_to_array)
-            })
-            .collect::<Result<Vec<_>>>()?;
-
-        let batch = RecordBatch::try_new_with_options(
-            Arc::clone(&schema),
-            arrays,
-            &RecordBatchOptions::new().with_row_count(Some(n_row)),
-        )?;
-
-        let partitions = vec![batch];
-        Self::try_new_from_batches(Arc::clone(&schema), partitions)
     }
 
     /// Create a new plan using the provided schema and batches.
@@ -845,12 +788,13 @@ mod memory_source_tests {
 mod tests {
     use super::*;
     use crate::test_util::col;
-    use crate::tests::{aggr_test_schema, make_partition};
+    use crate::tests::make_partition;
+    use crate::values::ValuesSource;
 
     use arrow::array::{ArrayRef, Int32Array, Int64Array, StringArray};
-    use arrow::datatypes::{DataType, Field};
-    use datafusion_common::assert_batches_eq;
+    use arrow::datatypes::{DataType, Field, Schema};
     use datafusion_common::stats::{ColumnStatistics, Precision};
+    use datafusion_common::{ScalarValue, assert_batches_eq};
     use datafusion_physical_expr::PhysicalSortExpr;
     use datafusion_physical_plan::expressions::lit;
 
@@ -883,14 +827,6 @@ mod tests {
         Ok(())
     }
 
-    #[tokio::test]
-    async fn values_empty_case() -> Result<()> {
-        let schema = aggr_test_schema();
-        let empty = MemorySourceConfig::try_new_as_values(schema, vec![]);
-        assert!(empty.is_err());
-        Ok(())
-    }
-
     #[test]
     fn new_exec_with_batches() {
         let batch = make_partition(7);
@@ -919,27 +855,6 @@ mod tests {
             .unwrap_err();
     }
 
-    // Test issue: https://github.com/apache/datafusion/issues/8763
-    #[test]
-    fn new_exec_with_non_nullable_schema() {
-        let schema = Arc::new(Schema::new(vec![Field::new(
-            "col0",
-            DataType::UInt32,
-            false,
-        )]));
-        let _ = MemorySourceConfig::try_new_as_values(
-            Arc::clone(&schema),
-            vec![vec![lit(1u32)]],
-        )
-        .unwrap();
-        // Test that a null value is rejected
-        let _ = MemorySourceConfig::try_new_as_values(
-            schema,
-            vec![vec![lit(ScalarValue::UInt32(None))]],
-        )
-        .unwrap_err();
-    }
-
     #[test]
     fn values_stats_with_nulls_only() -> Result<()> {
         let data = vec![
@@ -950,7 +865,9 @@ mod tests {
         let rows = data.len();
         let schema =
             Arc::new(Schema::new(vec![Field::new("col0", DataType::Null, true)]));
-        let values = MemorySourceConfig::try_new_as_values(schema, data)?;
+
+        let values = ValuesSource::try_new_exec(schema, data)?;
+        assert!(values.data_source().as_any().is::<MemorySourceConfig>());
 
         assert_eq!(
             values.partition_statistics(None)?,

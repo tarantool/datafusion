@@ -2379,6 +2379,17 @@ async fn roundtrip_resolve_placeholders_exec() -> Result<()> {
     roundtrip_test(plan)
 }
 
+#[tokio::test]
+async fn roundtrip_values_source() -> Result<()> {
+    let ctx = SessionContext::new();
+    let plan = ctx
+        .sql("SELECT * FROM VALUES (10, $1), (20, 30), (40, $2), ($3, $3), ($4, $5), (50, 60)")
+        .await?
+        .create_physical_plan()
+        .await?;
+    roundtrip_test(plan)
+}
+
 /// Test that HashTableLookupExpr serializes to lit(true)
 ///
 /// HashTableLookupExpr contains a runtime hash table that cannot be serialized.

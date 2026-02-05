@@ -34,6 +34,7 @@ use datafusion_datasource::file_compression_type::FileCompressionType;
 use datafusion_datasource::file_scan_config::{FileScanConfig, FileScanConfigBuilder};
 use datafusion_datasource::sink::DataSinkExec;
 use datafusion_datasource::source::{DataSource, DataSourceExec};
+use datafusion_datasource::values::ValuesSource;
 #[cfg(feature = "avro")]
 use datafusion_datasource_avro::source::AvroSource;
 use datafusion_datasource_csv::file_format::CsvSink;
@@ -323,6 +324,9 @@ impl protobuf::PhysicalPlanNode {
                     codec,
                     proto_converter,
                 ),
+            PhysicalPlanType::ValuesScan(scan) => {
+                self.try_into_values_scan_exec(scan, ctx, codec, proto_converter)
+            }
         }
     }
 
@@ -2248,6 +2252,34 @@ impl protobuf::PhysicalPlanNode {
         Ok(Arc::new(transformer))
     }
 
+    fn try_into_values_scan_exec(
+        &self,
+        scan: &protobuf::ValuesExecNode,
+        ctx: &TaskContext,
+        codec: &dyn PhysicalExtensionCodec,
+        proto_converter: &dyn PhysicalProtoConverterExtension,
+    ) -> Result<Arc<dyn ExecutionPlan>> {
+        let proto_schema = scan.schema.as_ref().ok_or_else(|| {
+            internal_datafusion_err!("schema in ValuesExecNode is missing.")
+        })?;
+        let schema = SchemaRef::new(proto_schema.try_into()?);
+        let linear_exprs = scan
+            .exprs
+            .iter()
+            .map(|expr| proto_converter.proto_to_physical_expr(expr, ctx, &schema, codec))
+            .collect::<Result<Vec<_>>>()?;
+
+        let columns = schema.fields.len();
+        let rows = linear_exprs.len().checked_div(columns).unwrap_or(0);
+        let mut exprs = Vec::with_capacity(rows);
+
+        for chunk in linear_exprs.chunks(columns) {
+            exprs.push(chunk.to_vec());
+        }
+
+        ValuesSource::try_new_exec(schema, exprs).map(|plan| plan as Arc<_>)
+    }
+
     fn try_from_explain_exec(
         exec: &ExplainExec,
         _codec: &dyn PhysicalExtensionCodec,
@@ -3006,6 +3038,15 @@ impl protobuf::PhysicalPlanNode {
             }));
         }
 
+        if let Some(source) = data_source.as_any().downcast_ref::<ValuesSource>() {
+            let node = protobuf::PhysicalPlanNode::try_from_values_source(
+                source,
+                codec,
+                proto_converter,
+            )?;
+            return Ok(Some(node));
+        }
+
         Ok(None)
     }
 
@@ -3392,6 +3433,14 @@ impl protobuf::PhysicalPlanNode {
             }));
         }
 
+        if let Some(source) = exec.sink().as_any().downcast_ref::<ValuesSource>() {
+            return Ok(Some(protobuf::PhysicalPlanNode::try_from_values_source(
+                source,
+                codec,
+                proto_converter,
+            )?));
+        }
+
         // If unknown DataSink then let extension handle it
         Ok(None)
     }
@@ -3651,6 +3700,29 @@ impl protobuf::PhysicalPlanNode {
                     rules,
                 },
             ))),
+        })
+    }
+
+    fn try_from_values_source(
+        source: &ValuesSource,
+        extension_codec: &dyn PhysicalExtensionCodec,
+        proto_converter: &dyn PhysicalProtoConverterExtension,
+    ) -> Result<Self> {
+        let schema = source.schema();
+        let proto_exprs = source
+            .expressions()
+            .iter()
+            .flatten()
+            .map(|expr| proto_converter.physical_expr_to_proto(expr, extension_codec))
+            .collect::<Result<Vec<_>>>()?;
+
+        Ok(protobuf::PhysicalPlanNode {
+            physical_plan_type: Some(PhysicalPlanType::ValuesScan(
+                protobuf::ValuesExecNode {
+                    schema: Some(schema.as_ref().try_into()?),
+                    exprs: proto_exprs,
+                },
+            )),
         })
     }
 }

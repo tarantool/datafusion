@@ -77,6 +77,7 @@ use datafusion_common::{
 };
 use datafusion_datasource::file_groups::FileGroup;
 use datafusion_datasource::memory::MemorySourceConfig;
+use datafusion_datasource::values::ValuesSource;
 use datafusion_expr::dml::{CopyTo, InsertOp};
 use datafusion_expr::expr::{
     AggregateFunction, AggregateFunctionParams, Alias, GroupingSet, NullTreatment,
@@ -486,8 +487,7 @@ impl DefaultPhysicalPlanner {
                             .collect::<Result<Vec<Arc<dyn PhysicalExpr>>>>()
                     })
                     .collect::<Result<Vec<_>>>()?;
-                MemorySourceConfig::try_new_as_values(Arc::clone(schema.inner()), exprs)?
-                    as _
+                ValuesSource::try_new_exec(Arc::clone(schema.inner()), exprs)?
             }
             LogicalPlan::EmptyRelation(EmptyRelation {
                 produce_one_row: false,
