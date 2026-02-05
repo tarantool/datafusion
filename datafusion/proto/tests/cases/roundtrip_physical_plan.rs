@@ -2362,6 +2362,23 @@ async fn roundtrip_async_func_exec() -> Result<()> {
     Ok(())
 }
 
+#[tokio::test]
+async fn roundtrip_resolve_placeholders_exec() -> Result<()> {
+    let ctx = SessionContext::new();
+    ctx.register_table(
+        "t",
+        Arc::new(EmptyTable::new(Arc::new(Schema::new(Fields::from([
+            Arc::new(Field::new("f", DataType::Int64, false)),
+        ]))))),
+    )?;
+    let plan = ctx
+        .sql("select * from t where f = $foo")
+        .await?
+        .create_physical_plan()
+        .await?;
+    roundtrip_test(plan)
+}
+
 /// Test that HashTableLookupExpr serializes to lit(true)
 ///
 /// HashTableLookupExpr contains a runtime hash table that cannot be serialized.

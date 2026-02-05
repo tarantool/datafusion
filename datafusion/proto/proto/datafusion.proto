@@ -751,6 +751,7 @@ message PhysicalPlanNode {
     MemoryScanExecNode memory_scan = 35;
     AsyncFuncExecNode async_func = 36;
     BufferExecNode buffer = 37;
+    TransformPlanExecNode transform_plan = 38;
   }
 }
 
@@ -1451,3 +1452,17 @@ message BufferExecNode {
   PhysicalPlanNode input = 1;
   uint64 capacity = 2;
 }
+
+message TransformPlanExecNode {
+  PhysicalPlanNode input = 1;
+  repeated TransformationRule rules = 2;
+}
+
+message TransformationRule {
+  oneof rule_type {
+    bytes extension = 1;
+    ResolvePlaceholdersRule resolve_placeholders = 2;
+  }
+}
+
+message ResolvePlaceholdersRule {}

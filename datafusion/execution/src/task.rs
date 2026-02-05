@@ -19,7 +19,9 @@ use crate::{
     config::SessionConfig, memory_pool::MemoryPool, registry::FunctionRegistry,
     runtime_env::RuntimeEnv,
 };
-use datafusion_common::{Result, internal_datafusion_err, plan_datafusion_err};
+use datafusion_common::{
+    ParamValues, Result, internal_datafusion_err, plan_datafusion_err,
+};
 use datafusion_expr::planner::ExprPlanner;
 use datafusion_expr::{AggregateUDF, ScalarUDF, WindowUDF};
 use std::collections::HashSet;
@@ -48,6 +50,8 @@ pub struct TaskContext {
     window_functions: HashMap<String, Arc<WindowUDF>>,
     /// Runtime environment associated with this task context
     runtime: Arc<RuntimeEnv>,
+    /// External query parameters
+    param_values: Option<ParamValues>,
 }
 
 impl Default for TaskContext {
@@ -63,6 +67,7 @@ impl Default for TaskContext {
             aggregate_functions: HashMap::new(),
             window_functions: HashMap::new(),
             runtime,
+            param_values: None,
         }
     }
 }
@@ -90,6 +95,7 @@ impl TaskContext {
             aggregate_functions,
             window_functions,
             runtime,
+            param_values: None,
         }
     }
 
@@ -118,6 +124,11 @@ impl TaskContext {
         Arc::clone(&self.runtime)
     }
 
+    /// Return param values associated with this [`TaskContext`]
+    pub fn param_values(&self) -> &Option<ParamValues> {
+        &self.param_values
+    }
+
     pub fn scalar_functions(&self) -> &HashMap<String, Arc<ScalarUDF>> {
         &self.scalar_functions
     }
@@ -139,6 +150,12 @@ impl TaskContext {
     /// Update the [`RuntimeEnv`]
     pub fn with_runtime(mut self, runtime: Arc<RuntimeEnv>) -> Self {
         self.runtime = runtime;
+        self
+    }
+
+    /// Update the [`ParamValues`]
+    pub fn with_param_values(mut self, param_values: ParamValues) -> Self {
+        self.param_values = Some(param_values);
         self
     }
 }

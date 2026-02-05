@@ -17905,6 +17905,9 @@ impl serde::Serialize for PhysicalPlanNode {
                 physical_plan_node::PhysicalPlanType::Buffer(v) => {
                     struct_ser.serialize_field("buffer", v)?;
                 }
+                physical_plan_node::PhysicalPlanType::TransformPlan(v) => {
+                    struct_ser.serialize_field("transformPlan", v)?;
+                }
             }
         }
         struct_ser.end()
@@ -17973,6 +17976,8 @@ impl<'de> serde::Deserialize<'de> for PhysicalPlanNode {
             "async_func",
             "asyncFunc",
             "buffer",
+            "transform_plan",
+            "transformPlan",
         ];
 
         #[allow(clippy::enum_variant_names)]
@@ -18013,6 +18018,7 @@ impl<'de> serde::Deserialize<'de> for PhysicalPlanNode {
             MemoryScan,
             AsyncFunc,
             Buffer,
+            TransformPlan,
         }
         impl<'de> serde::Deserialize<'de> for GeneratedField {
             fn deserialize<D>(deserializer: D) -> std::result::Result<GeneratedField, D::Error>
@@ -18070,6 +18076,7 @@ impl<'de> serde::Deserialize<'de> for PhysicalPlanNode {
                             "memoryScan" | "memory_scan" => Ok(GeneratedField::MemoryScan),
                             "asyncFunc" | "async_func" => Ok(GeneratedField::AsyncFunc),
                             "buffer" => Ok(GeneratedField::Buffer),
+                            "transformPlan" | "transform_plan" => Ok(GeneratedField::TransformPlan),
                             _ => Err(serde::de::Error::unknown_field(value, FIELDS)),
                         }
                     }
@@ -18342,6 +18349,13 @@ impl<'de> serde::Deserialize<'de> for PhysicalPlanNode {
                                 return Err(serde::de::Error::duplicate_field("buffer"));
                             }
                             physical_plan_type__ = map_.next_value::<::std::option::Option<_>>()?.map(physical_plan_node::PhysicalPlanType::Buffer)
+;
+                        }
+                        GeneratedField::TransformPlan => {
+                            if physical_plan_type__.is_some() {
+                                return Err(serde::de::Error::duplicate_field("transformPlan"));
+                            }
+                            physical_plan_type__ = map_.next_value::<::std::option::Option<_>>()?.map(physical_plan_node::PhysicalPlanType::TransformPlan)
 ;
                         }
                     }
@@ -20914,6 +20928,77 @@ impl<'de> serde::Deserialize<'de> for RepartitionNode {
         deserializer.deserialize_struct("datafusion.RepartitionNode", FIELDS, GeneratedVisitor)
     }
 }
+impl serde::Serialize for ResolvePlaceholdersRule {
+    #[allow(deprecated)]
+    fn serialize<S>(&self, serializer: S) -> std::result::Result<S::Ok, S::Error>
+    where
+        S: serde::Serializer,
+    {
+        use serde::ser::SerializeStruct;
+        let len = 0;
+        let struct_ser = serializer.serialize_struct("datafusion.ResolvePlaceholdersRule", len)?;
+        struct_ser.end()
+    }
+}
+impl<'de> serde::Deserialize<'de> for ResolvePlaceholdersRule {
+    #[allow(deprecated)]
+    fn deserialize<D>(deserializer: D) -> std::result::Result<Self, D::Error>
+    where
+        D: serde::Deserializer<'de>,
+    {
+        const FIELDS: &[&str] = &[
+        ];
+
+        #[allow(clippy::enum_variant_names)]
+        enum GeneratedField {
+        }
+        impl<'de> serde::Deserialize<'de> for GeneratedField {
+            fn deserialize<D>(deserializer: D) -> std::result::Result<GeneratedField, D::Error>
+            where
+                D: serde::Deserializer<'de>,
+            {
+                struct GeneratedVisitor;
+
+                impl serde::de::Visitor<'_> for GeneratedVisitor {
+                    type Value = GeneratedField;
+
+                    fn expecting(&self, formatter: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+                        write!(formatter, "expected one of: {:?}", &FIELDS)
+                    }
+
+                    #[allow(unused_variables)]
+                    fn visit_str<E>(self, value: &str) -> std::result::Result<GeneratedField, E>
+                    where
+                        E: serde::de::Error,
+                    {
+                            Err(serde::de::Error::unknown_field(value, FIELDS))
+                    }
+                }
+                deserializer.deserialize_identifier(GeneratedVisitor)
+            }
+        }
+        struct GeneratedVisitor;
+        impl<'de> serde::de::Visitor<'de> for GeneratedVisitor {
+            type Value = ResolvePlaceholdersRule;
+
+            fn expecting(&self, formatter: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+                formatter.write_str("struct datafusion.ResolvePlaceholdersRule")
+            }
+
+            fn visit_map<V>(self, mut map_: V) -> std::result::Result<ResolvePlaceholdersRule, V::Error>
+                where
+                    V: serde::de::MapAccess<'de>,
+            {
+                while map_.next_key::<GeneratedField>()?.is_some() {
+                    let _ = map_.next_value::<serde::de::IgnoredAny>()?;
+                }
+                Ok(ResolvePlaceholdersRule {
+                })
+            }
+        }
+        deserializer.deserialize_struct("datafusion.ResolvePlaceholdersRule", FIELDS, GeneratedVisitor)
+    }
+}
 impl serde::Serialize for RollupNode {
     #[allow(deprecated)]
     fn serialize<S>(&self, serializer: S) -> std::result::Result<S::Ok, S::Error>
@@ -23040,6 +23125,225 @@ impl<'de> serde::Deserialize<'de> for TableReference {
             }
         }
         deserializer.deserialize_struct("datafusion.TableReference", FIELDS, GeneratedVisitor)
+    }
+}
+impl serde::Serialize for TransformPlanExecNode {
+    #[allow(deprecated)]
+    fn serialize<S>(&self, serializer: S) -> std::result::Result<S::Ok, S::Error>
+    where
+        S: serde::Serializer,
+    {
+        use serde::ser::SerializeStruct;
+        let mut len = 0;
+        if self.input.is_some() {
+            len += 1;
+        }
+        if !self.rules.is_empty() {
+            len += 1;
+        }
+        let mut struct_ser = serializer.serialize_struct("datafusion.TransformPlanExecNode", len)?;
+        if let Some(v) = self.input.as_ref() {
+            struct_ser.serialize_field("input", v)?;
+        }
+        if !self.rules.is_empty() {
+            struct_ser.serialize_field("rules", &self.rules)?;
+        }
+        struct_ser.end()
+    }
+}
+impl<'de> serde::Deserialize<'de> for TransformPlanExecNode {
+    #[allow(deprecated)]
+    fn deserialize<D>(deserializer: D) -> std::result::Result<Self, D::Error>
+    where
+        D: serde::Deserializer<'de>,
+    {
+        const FIELDS: &[&str] = &[
+            "input",
+            "rules",
+        ];
+
+        #[allow(clippy::enum_variant_names)]
+        enum GeneratedField {
+            Input,
+            Rules,
+        }
+        impl<'de> serde::Deserialize<'de> for GeneratedField {
+            fn deserialize<D>(deserializer: D) -> std::result::Result<GeneratedField, D::Error>
+            where
+                D: serde::Deserializer<'de>,
+            {
+                struct GeneratedVisitor;
+
+                impl serde::de::Visitor<'_> for GeneratedVisitor {
+                    type Value = GeneratedField;
+
+                    fn expecting(&self, formatter: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+                        write!(formatter, "expected one of: {:?}", &FIELDS)
+                    }
+
+                    #[allow(unused_variables)]
+                    fn visit_str<E>(self, value: &str) -> std::result::Result<GeneratedField, E>
+                    where
+                        E: serde::de::Error,
+                    {
+                        match value {
+                            "input" => Ok(GeneratedField::Input),
+                            "rules" => Ok(GeneratedField::Rules),
+                            _ => Err(serde::de::Error::unknown_field(value, FIELDS)),
+                        }
+                    }
+                }
+                deserializer.deserialize_identifier(GeneratedVisitor)
+            }
+        }
+        struct GeneratedVisitor;
+        impl<'de> serde::de::Visitor<'de> for GeneratedVisitor {
+            type Value = TransformPlanExecNode;
+
+            fn expecting(&self, formatter: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+                formatter.write_str("struct datafusion.TransformPlanExecNode")
+            }
+
+            fn visit_map<V>(self, mut map_: V) -> std::result::Result<TransformPlanExecNode, V::Error>
+                where
+                    V: serde::de::MapAccess<'de>,
+            {
+                let mut input__ = None;
+                let mut rules__ = None;
+                while let Some(k) = map_.next_key()? {
+                    match k {
+                        GeneratedField::Input => {
+                            if input__.is_some() {
+                                return Err(serde::de::Error::duplicate_field("input"));
+                            }
+                            input__ = map_.next_value()?;
+                        }
+                        GeneratedField::Rules => {
+                            if rules__.is_some() {
+                                return Err(serde::de::Error::duplicate_field("rules"));
+                            }
+                            rules__ = Some(map_.next_value()?);
+                        }
+                    }
+                }
+                Ok(TransformPlanExecNode {
+                    input: input__,
+                    rules: rules__.unwrap_or_default(),
+                })
+            }
+        }
+        deserializer.deserialize_struct("datafusion.TransformPlanExecNode", FIELDS, GeneratedVisitor)
+    }
+}
+impl serde::Serialize for TransformationRule {
+    #[allow(deprecated)]
+    fn serialize<S>(&self, serializer: S) -> std::result::Result<S::Ok, S::Error>
+    where
+        S: serde::Serializer,
+    {
+        use serde::ser::SerializeStruct;
+        let mut len = 0;
+        if self.rule_type.is_some() {
+            len += 1;
+        }
+        let mut struct_ser = serializer.serialize_struct("datafusion.TransformationRule", len)?;
+        if let Some(v) = self.rule_type.as_ref() {
+            match v {
+                transformation_rule::RuleType::Extension(v) => {
+                    #[allow(clippy::needless_borrow)]
+                    #[allow(clippy::needless_borrows_for_generic_args)]
+                    struct_ser.serialize_field("extension", pbjson::private::base64::encode(&v).as_str())?;
+                }
+                transformation_rule::RuleType::ResolvePlaceholders(v) => {
+                    struct_ser.serialize_field("resolvePlaceholders", v)?;
+                }
+            }
+        }
+        struct_ser.end()
+    }
+}
+impl<'de> serde::Deserialize<'de> for TransformationRule {
+    #[allow(deprecated)]
+    fn deserialize<D>(deserializer: D) -> std::result::Result<Self, D::Error>
+    where
+        D: serde::Deserializer<'de>,
+    {
+        const FIELDS: &[&str] = &[
+            "extension",
+            "resolve_placeholders",
+            "resolvePlaceholders",
+        ];
+
+        #[allow(clippy::enum_variant_names)]
+        enum GeneratedField {
+            Extension,
+            ResolvePlaceholders,
+        }
+        impl<'de> serde::Deserialize<'de> for GeneratedField {
+            fn deserialize<D>(deserializer: D) -> std::result::Result<GeneratedField, D::Error>
+            where
+                D: serde::Deserializer<'de>,
+            {
+                struct GeneratedVisitor;
+
+                impl serde::de::Visitor<'_> for GeneratedVisitor {
+                    type Value = GeneratedField;
+
+                    fn expecting(&self, formatter: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+                        write!(formatter, "expected one of: {:?}", &FIELDS)
+                    }
+
+                    #[allow(unused_variables)]
+                    fn visit_str<E>(self, value: &str) -> std::result::Result<GeneratedField, E>
+                    where
+                        E: serde::de::Error,
+                    {
+                        match value {
+                            "extension" => Ok(GeneratedField::Extension),
+                            "resolvePlaceholders" | "resolve_placeholders" => Ok(GeneratedField::ResolvePlaceholders),
+                            _ => Err(serde::de::Error::unknown_field(value, FIELDS)),
+                        }
+                    }
+                }
+                deserializer.deserialize_identifier(GeneratedVisitor)
+            }
+        }
+        struct GeneratedVisitor;
+        impl<'de> serde::de::Visitor<'de> for GeneratedVisitor {
+            type Value = TransformationRule;
+
+            fn expecting(&self, formatter: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+                formatter.write_str("struct datafusion.TransformationRule")
+            }
+
+            fn visit_map<V>(self, mut map_: V) -> std::result::Result<TransformationRule, V::Error>
+                where
+                    V: serde::de::MapAccess<'de>,
+            {
+                let mut rule_type__ = None;
+                while let Some(k) = map_.next_key()? {
+                    match k {
+                        GeneratedField::Extension => {
+                            if rule_type__.is_some() {
+                                return Err(serde::de::Error::duplicate_field("extension"));
+                            }
+                            rule_type__ = map_.next_value::<::std::option::Option<::pbjson::private::BytesDeserialize<_>>>()?.map(|x| transformation_rule::RuleType::Extension(x.0));
+                        }
+                        GeneratedField::ResolvePlaceholders => {
+                            if rule_type__.is_some() {
+                                return Err(serde::de::Error::duplicate_field("resolvePlaceholders"));
+                            }
+                            rule_type__ = map_.next_value::<::std::option::Option<_>>()?.map(transformation_rule::RuleType::ResolvePlaceholders)
+;
+                        }
+                    }
+                }
+                Ok(TransformationRule {
+                    rule_type: rule_type__,
+                })
+            }
+        }
+        deserializer.deserialize_struct("datafusion.TransformationRule", FIELDS, GeneratedVisitor)
     }
 }
 impl serde::Serialize for TryCastNode {
