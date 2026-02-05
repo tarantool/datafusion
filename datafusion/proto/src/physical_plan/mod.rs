@@ -75,6 +75,9 @@ use datafusion_physical_plan::limit::{GlobalLimitExec, LocalLimitExec};
 use datafusion_physical_plan::memory::LazyMemoryExec;
 use datafusion_physical_plan::metrics::MetricType;
 use datafusion_physical_plan::placeholder_row::PlaceholderRowExec;
+use datafusion_physical_plan::plan_transformer::{
+    ExecutionTransformationRule, ResolvePlaceholdersRule, TransformPlanExec,
+};
 use datafusion_physical_plan::projection::{ProjectionExec, ProjectionExpr};
 use datafusion_physical_plan::repartition::RepartitionExec;
 use datafusion_physical_plan::sorts::sort::SortExec;
@@ -102,6 +105,7 @@ use crate::physical_plan::to_proto::{
 use crate::protobuf::physical_aggregate_expr_node::AggregateFunction;
 use crate::protobuf::physical_expr_node::ExprType;
 use crate::protobuf::physical_plan_node::PhysicalPlanType;
+use crate::protobuf::transformation_rule::RuleType;
 use crate::protobuf::{
     self, ListUnnest as ProtoListUnnest, SortExprNode, SortMergeJoinExecNode,
     proto_error, window_agg_exec_node,
@@ -312,6 +316,13 @@ impl protobuf::PhysicalPlanNode {
             PhysicalPlanType::Buffer(buffer) => {
                 self.try_into_buffer_physical_plan(buffer, ctx, codec, proto_converter)
             }
+            PhysicalPlanType::TransformPlan(transform_plan) => self
+                .try_into_transform_plan_exec(
+                    transform_plan,
+                    ctx,
+                    codec,
+                    proto_converter,
+                ),
         }
     }
 
@@ -554,6 +565,14 @@ impl protobuf::PhysicalPlanNode {
 
         if let Some(exec) = plan.downcast_ref::<BufferExec>() {
             return protobuf::PhysicalPlanNode::try_from_buffer_exec(
+                exec,
+                codec,
+                proto_converter,
+            );
+        }
+
+        if let Some(exec) = plan.downcast_ref::<TransformPlanExec>() {
+            return protobuf::PhysicalPlanNode::try_from_transform_plan_exec(
                 exec,
                 codec,
                 proto_converter,
@@ -2198,6 +2217,37 @@ impl protobuf::PhysicalPlanNode {
         Ok(Arc::new(BufferExec::new(input, buffer.capacity as usize)))
     }
 
+    fn try_into_transform_plan_exec(
+        &self,
+        transform_plan: &protobuf::TransformPlanExecNode,
+        ctx: &TaskContext,
+        codec: &dyn PhysicalExtensionCodec,
+        proto_converter: &dyn PhysicalProtoConverterExtension,
+    ) -> Result<Arc<dyn ExecutionPlan>> {
+        let input: Arc<dyn ExecutionPlan> =
+            into_physical_plan(&transform_plan.input, ctx, codec, proto_converter)?;
+
+        let mut rules: Vec<Box<dyn ExecutionTransformationRule>> =
+            Vec::with_capacity(transform_plan.rules.len());
+
+        for rule in transform_plan.rules.iter() {
+            match &rule.rule_type {
+                Some(RuleType::ResolvePlaceholders(_)) => {
+                    rules.push(Box::new(ResolvePlaceholdersRule::new()))
+                }
+                Some(RuleType::Extension(ext)) => {
+                    rules.push(codec.try_decode_transformation_rule(ext)?)
+                }
+                None => {
+                    return internal_err!("Missing rule_type in TransformationRule");
+                }
+            }
+        }
+
+        let transformer = TransformPlanExec::try_new(input, rules)?;
+        Ok(Arc::new(transformer))
+    }
+
     fn try_from_explain_exec(
         exec: &ExplainExec,
         _codec: &dyn PhysicalExtensionCodec,
@@ -3567,6 +3617,42 @@ impl protobuf::PhysicalPlanNode {
             ))),
         })
     }
+
+    fn try_from_transform_plan_exec(
+        exec: &TransformPlanExec,
+        extension_codec: &dyn PhysicalExtensionCodec,
+        proto_converter: &dyn PhysicalProtoConverterExtension,
+    ) -> Result<Self> {
+        let input = protobuf::PhysicalPlanNode::try_from_physical_plan_with_converter(
+            Arc::clone(exec.input()),
+            extension_codec,
+            proto_converter,
+        )?;
+
+        let mut rules = Vec::with_capacity(exec.rules().len());
+        for rule in exec.rules() {
+            let rule_type = if rule.as_any().is::<ResolvePlaceholdersRule>() {
+                Some(RuleType::ResolvePlaceholders(
+                    protobuf::ResolvePlaceholdersRule {},
+                ))
+            } else {
+                let mut buf = vec![];
+                extension_codec
+                    .try_encode_transformation_rule(rule.as_ref(), &mut buf)?;
+                Some(RuleType::Extension(buf))
+            };
+            rules.push(protobuf::TransformationRule { rule_type });
+        }
+
+        Ok(protobuf::PhysicalPlanNode {
+            physical_plan_type: Some(PhysicalPlanType::TransformPlan(Box::new(
+                protobuf::TransformPlanExecNode {
+                    input: Some(Box::new(input)),
+                    rules,
+                },
+            ))),
+        })
+    }
 }
 
 pub trait AsExecutionPlan: Debug + Send + Sync + Clone {
@@ -3636,6 +3722,21 @@ pub trait PhysicalExtensionCodec: Debug + Send + Sync {
 
     fn try_encode_udaf(&self, _node: &AggregateUDF, _buf: &mut Vec<u8>) -> Result<()> {
         Ok(())
+    }
+
+    fn try_decode_transformation_rule(
+        &self,
+        _buf: &[u8],
+    ) -> Result<Box<dyn ExecutionTransformationRule>> {
+        not_impl_err!("PhysicalExtensionCodec is not provided")
+    }
+
+    fn try_encode_transformation_rule(
+        &self,
+        _node: &dyn ExecutionTransformationRule,
+        _buf: &mut Vec<u8>,
+    ) -> Result<()> {
+        not_impl_err!("PhysicalExtensionCodec is not provided")
     }
 
     fn try_decode_udwf(&self, name: &str, _buf: &[u8]) -> Result<Arc<WindowUDF>> {
@@ -4070,6 +4171,25 @@ impl PhysicalExtensionCodec for ComposedPhysicalExtensionCodec {
 
     fn try_encode_udaf(&self, node: &AggregateUDF, buf: &mut Vec<u8>) -> Result<()> {
         self.encode_protobuf(buf, |codec, data| codec.try_encode_udaf(node, data))
+    }
+
+    fn try_decode_transformation_rule(
+        &self,
+        buf: &[u8],
+    ) -> Result<Box<dyn ExecutionTransformationRule>> {
+        self.decode_protobuf(buf, |codec, data| {
+            codec.try_decode_transformation_rule(data)
+        })
+    }
+
+    fn try_encode_transformation_rule(
+        &self,
+        node: &dyn ExecutionTransformationRule,
+        buf: &mut Vec<u8>,
+    ) -> Result<()> {
+        self.encode_protobuf(buf, |codec, data| {
+            codec.try_encode_transformation_rule(node, data)
+        })
     }
 }
 

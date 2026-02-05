@@ -19,6 +19,7 @@ use std::collections::HashMap;
 
 use super::*;
 use datafusion_common::{ParamValues, ScalarValue, metadata::ScalarAndMetadata};
+use datafusion_execution::TaskContext;
 use insta::assert_snapshot;
 
 #[tokio::test]
@@ -429,5 +430,145 @@ async fn test_select_cast_date_literal_to_timestamp_overflow() -> Result<()> {
         err.to_string(),
         "Cannot cast Date32 value 2932896 to Timestamp(ns): converted value exceeds the representable i64 range"
     );
+    Ok(())
+}
+
+#[tokio::test]
+async fn test_resolve_window_function() -> Result<()> {
+    let ctx = SessionContext::new();
+    let batch = record_batch!(("id", Int32, [1, 2]), ("name", Utf8, ["Alex", "Bob"]))?;
+    ctx.register_batch("t1", batch)?;
+
+    let plan = ctx
+        .sql("SELECT id, SUM(id + $1) OVER (PARTITION BY name ORDER BY id) FROM t1")
+        .await?
+        .create_physical_plan()
+        .await?;
+
+    let param_values = ParamValues::List(vec![ScalarValue::Int32(Some(100)).into()]);
+    let task_ctx = Arc::new(TaskContext::from(&ctx).with_param_values(param_values));
+    let batches = collect(plan, task_ctx).await?;
+
+    assert_snapshot!(batches_to_sort_string(&batches), @r"
+    +----+--------------------------------------------------------------------------------------------------------------------------+
+    | id | sum(t1.id + $1) PARTITION BY [t1.name] ORDER BY [t1.id ASC NULLS LAST] RANGE BETWEEN UNBOUNDED PRECEDING AND CURRENT ROW |
+    +----+--------------------------------------------------------------------------------------------------------------------------+
+    | 1  | 101                                                                                                                      |
+    | 2  | 102                                                                                                                      |
+    +----+--------------------------------------------------------------------------------------------------------------------------+
+    ");
+
+    Ok(())
+}
+
+#[tokio::test]
+async fn test_resolve_join() -> Result<()> {
+    let ctx = SessionContext::new();
+    let batch_1 = record_batch!(
+        ("id", Int32, [1, 2]),
+        ("name", Utf8, ["Alex", "Bob"]),
+        ("age", Int32, [30, 40])
+    )?;
+
+    let batch_2 = record_batch!(
+        ("id", Int32, [10, 20]),
+        ("name", Utf8, ["Carol", "David"]),
+        ("age", Int32, [35, 45])
+    )?;
+
+    ctx.register_batch("t1", batch_1)?;
+    ctx.register_batch("t2", batch_2)?;
+
+    let plan = ctx
+        .sql("SELECT t1.name, t2.age FROM t1 JOIN t2 ON t1.id + $1 = t2.id;")
+        .await?
+        .create_physical_plan()
+        .await?;
+
+    let param_values = ParamValues::List(vec![ScalarValue::Int32(Some(8)).into()]);
+    let task_ctx = Arc::new(TaskContext::from(&ctx).with_param_values(param_values));
+    let batches = collect(plan, task_ctx).await?;
+
+    assert_snapshot!(batches_to_sort_string(&batches), @r"
+    +------+-----+
+    | name | age |
+    +------+-----+
+    | Bob  | 35  |
+    +------+-----+
+    ");
+
+    Ok(())
+}
+
+#[tokio::test]
+async fn test_resolve_cast() -> Result<()> {
+    let ctx = SessionContext::new();
+    let plan = ctx
+        .sql("SELECT CAST($1 as INT)")
+        .await?
+        .create_physical_plan()
+        .await?;
+
+    let param_values = ParamValues::List(vec![
+        ScalarValue::Utf8(Some("not a number".to_string())).into(),
+    ]);
+
+    let task_ctx = Arc::new(TaskContext::from(&ctx).with_param_values(param_values));
+    let result = collect(Arc::clone(&plan), task_ctx).await;
+    assert!(result.is_err());
+
+    let param_values =
+        ParamValues::List(vec![ScalarValue::Utf8(Some("200".to_string())).into()]);
+    let task_ctx = Arc::new(TaskContext::from(&ctx).with_param_values(param_values));
+    let batches = collect(plan, task_ctx).await?;
+
+    assert_snapshot!(batches_to_sort_string(&batches), @r"
+    +-----+
+    | $1  |
+    +-----+
+    | 200 |
+    +-----+
+    ");
+
+    Ok(())
+}
+
+#[tokio::test]
+async fn test_resolve_try_cast() -> Result<()> {
+    let ctx = SessionContext::new();
+    let plan = ctx
+        .sql("SELECT TRY_CAST($1 as INT)")
+        .await?
+        .create_physical_plan()
+        .await?;
+
+    let param_values = ParamValues::List(vec![
+        ScalarValue::Utf8(Some("not a number".to_string())).into(),
+    ]);
+
+    let task_ctx = Arc::new(TaskContext::from(&ctx).with_param_values(param_values));
+    let batches = collect(Arc::clone(&plan), task_ctx).await?;
+
+    assert_snapshot!(batches_to_sort_string(&batches), @r"
+    +----+
+    | $1 |
+    +----+
+    |    |
+    +----+
+    ");
+
+    let param_values =
+        ParamValues::List(vec![ScalarValue::Utf8(Some("200".to_string())).into()]);
+    let task_ctx = Arc::new(TaskContext::from(&ctx).with_param_values(param_values));
+    let batches = collect(plan, task_ctx).await?;
+
+    assert_snapshot!(batches_to_sort_string(&batches), @r"
+    +-----+
+    | $1  |
+    +-----+
+    | 200 |
+    +-----+
+    ");
+
     Ok(())
 }

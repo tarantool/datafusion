@@ -38,6 +38,7 @@ use crate::PhysicalOptimizerRule;
 use datafusion_common::tree_node::{TreeNode, TreeNodeRecursion};
 use datafusion_common::{Result, assert_eq_or_internal_err, config::ConfigOptions};
 use datafusion_physical_expr::PhysicalExpr;
+use datafusion_physical_expr::expressions::has_placeholders;
 use datafusion_physical_expr_common::physical_expr::is_volatile;
 use datafusion_physical_plan::filter_pushdown::{
     ChildFilterPushdownResult, ChildPushdownResult, FilterPushdownPhase,
@@ -486,16 +487,24 @@ fn push_down_filters(
         // currently. `self_filters` are the predicates which are provided by the current node,
         // and tried to be pushed down over the child similarly.
 
-        // Filter out self_filters that contain volatile expressions and track indices
-        let self_filtered = FilteredVec::new(&self_filters, allow_pushdown_for_expr);
+        let child_supports_exprs_replacement = child.physical_expressions().is_some();
+
+        // Filter out self_filters that contain volatile expressions or unsupported placeholders
+        // and track indices.
+        let self_filtered = FilteredVec::new(&self_filters, |expr| {
+            allow_pushdown_for_expr(expr)
+                && (child_supports_exprs_replacement || !has_placeholders(expr))
+        });
 
         let num_self_filters = self_filtered.len();
         let mut all_predicates = self_filtered.items().to_vec();
 
         // Apply second filter pass: collect indices of parent filters that can be pushed down
-        let parent_filters_for_child = parent_filtered
-            .chain_filter_slice(&parent_filters, |filter| {
+        let parent_filters_for_child =
+            parent_filtered.chain_filter_slice(&parent_filters, |filter| {
                 matches!(filter.discriminant, PushedDown::Yes)
+                    && (child_supports_exprs_replacement
+                        || !has_placeholders(&filter.predicate))
             });
 
         // Add the filtered parent predicates to all_predicates
