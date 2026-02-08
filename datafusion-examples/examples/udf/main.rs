@@ -50,6 +50,9 @@
 //!
 //! - `udwf`
 //!   (file: simple_udwf.rs, desc: Simple UDWF example)
+//!
+//! - `table_list_udtf`
+//!   (file: table_list_udtf.rs, desc: Session-aware UDTF table list example)
 
 mod advanced_udaf;
 mod advanced_udf;

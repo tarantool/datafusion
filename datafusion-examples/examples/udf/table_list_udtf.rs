@@ -28,12 +28,12 @@ use datafusion::{
     prelude::SessionContext,
 };
 use datafusion_common::{DataFusionError, plan_err};
-use futures::executor::block_on;
+use tokio::{runtime::Handle, task::block_in_place};
 
 const FUNCTION_NAME: &str = "table_list";
 
 // The example shows, how to create UDTF that depends on the session state.
-// There is `table_list` UDTF is defined which returns list of tables within session.
+// Defines a `table_list` UDTF that returns a list of tables within the provided session.
 
 pub async fn table_list_udtf() -> Result<()> {
     let ctx = SessionContext::new();
@@ -96,7 +96,10 @@ impl TableFunctionImpl for TableListUdtf {
                     continue;
                 };
                 for table_name in schema.table_names() {
-                    let Some(provider) = block_on(schema.table(&table_name))? else {
+                    let Some(provider) = block_in_place(|| {
+                        Handle::current().block_on(schema.table(&table_name))
+                    })?
+                    else {
                         continue;
                     };
                     catalogs.push(catalog_name.clone());
