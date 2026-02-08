@@ -20,10 +20,9 @@ use std::sync::Arc;
 
 use abi_stable::StableAbi;
 use abi_stable::std_types::{RResult, RVec};
-use datafusion_catalog::{TableFunctionImpl, TableProvider};
+use datafusion_catalog::{TableFunctionArgs, TableFunctionImpl, TableProvider};
 use datafusion_common::error::Result;
 use datafusion_execution::TaskContext;
-use datafusion_expr::Expr;
 use datafusion_proto::logical_plan::from_proto::parse_exprs;
 use datafusion_proto::logical_plan::to_proto::serialize_exprs;
 use datafusion_proto::logical_plan::{
@@ -106,6 +105,7 @@ unsafe extern "C" fn call_fn_wrapper(
         codec.as_ref()
     ));
 
+    #[expect(deprecated)]
     let table_provider = rresult_return!(udtf_inner.call(&args));
     RResult::ROk(FFI_TableProvider::new_with_ffi_codec(
         table_provider,
@@ -208,10 +208,10 @@ impl From<FFI_TableFunction> for Arc<dyn TableFunctionImpl> {
 }
 
 impl TableFunctionImpl for ForeignTableFunction {
-    fn call(&self, args: &[Expr]) -> Result<Arc<dyn TableProvider>> {
+    fn call_with_args(&self, args: TableFunctionArgs) -> Result<Arc<dyn TableProvider>> {
         let codec: Arc<dyn LogicalExtensionCodec> = (&self.0.logical_codec).into();
         let expr_list = LogicalExprList {
-            expr: serialize_exprs(args, codec.as_ref())?,
+            expr: serialize_exprs(args.args, codec.as_ref())?,
         };
         let filters_serialized = expr_list.encode_to_vec().into();
 
@@ -235,7 +235,9 @@ mod tests {
     use datafusion::logical_expr::ptr_eq::arc_ptr_eq;
     use datafusion::prelude::{SessionContext, lit};
     use datafusion::scalar::ScalarValue;
+    use datafusion_catalog::TableFunctionArgs;
     use datafusion_execution::TaskContextProvider;
+    use datafusion_expr::Expr;
 
     use super::*;
 
@@ -243,8 +245,12 @@ mod tests {
     struct TestUDTF {}
 
     impl TableFunctionImpl for TestUDTF {
-        fn call(&self, args: &[Expr]) -> Result<Arc<dyn TableProvider>> {
+        fn call_with_args(
+            &self,
+            args: TableFunctionArgs,
+        ) -> Result<Arc<dyn TableProvider>> {
             let args = args
+                .args
                 .iter()
                 .map(|arg| {
                     if let Expr::Literal(scalar, _) = arg {

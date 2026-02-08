@@ -59,6 +59,7 @@ mod simple_udaf;
 mod simple_udf;
 mod simple_udtf;
 mod simple_udwf;
+mod table_list_udtf;
 
 use datafusion::error::{DataFusionError, Result};
 use strum::{IntoEnumIterator, VariantNames};
@@ -76,6 +77,7 @@ enum ExampleKind {
     Udaf,
     Udwf,
     Udtf,
+    TableListUdtf,
 }
 
 impl ExampleKind {
@@ -101,6 +103,7 @@ impl ExampleKind {
             ExampleKind::Udf => simple_udf::simple_udf().await?,
             ExampleKind::Udtf => simple_udtf::simple_udtf().await?,
             ExampleKind::Udwf => simple_udwf::simple_udwf().await?,
+            ExampleKind::TableListUdtf => table_list_udtf::table_list_udtf().await?,
         }
 
         Ok(())
