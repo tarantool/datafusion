@@ -400,7 +400,7 @@ pub fn resolve_placeholders_exec(
     input: Arc<dyn ExecutionPlan>,
 ) -> Arc<dyn ExecutionPlan> {
     Arc::new(
-        TransformPlanExec::try_new(input, vec![Box::new(ResolvePlaceholdersRule::new())])
+        TransformPlanExec::try_new(input, vec![Arc::new(ResolvePlaceholdersRule::new())])
             .unwrap(),
     )
 }

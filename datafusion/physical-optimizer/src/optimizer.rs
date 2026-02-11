@@ -25,12 +25,12 @@ use crate::combine_partial_final_agg::CombinePartialFinalAggregate;
 use crate::enforce_distribution::EnforceDistribution;
 use crate::enforce_sorting::EnforceSorting;
 use crate::ensure_coop::EnsureCooperative;
+use crate::exec_transform_apply::ExecutionTransformationApplier;
 use crate::filter_pushdown::FilterPushdown;
 use crate::join_selection::JoinSelection;
 use crate::limit_pushdown::LimitPushdown;
 use crate::limited_distinct_aggregation::LimitedDistinctAggregation;
 use crate::output_requirements::OutputRequirements;
-use crate::physical_expr_resolver::PhysicalExprResolver;
 use crate::projection_pushdown::ProjectionPushdown;
 use crate::sanity_checker::SanityCheckPlan;
 use crate::topk_aggregation::TopKAggregation;
@@ -41,6 +41,7 @@ use crate::pushdown_sort::PushdownSort;
 use datafusion_common::Result;
 use datafusion_common::config::ConfigOptions;
 use datafusion_physical_plan::ExecutionPlan;
+use datafusion_physical_plan::plan_transformer::ResolvePlaceholdersRule;
 
 /// `PhysicalOptimizerRule` transforms one ['ExecutionPlan'] into another which
 /// computes the same results, but in a potentially more efficient way.
@@ -88,7 +89,7 @@ impl PhysicalOptimizer {
             // this information is not lost across different rules during optimization.
             Arc::new(OutputRequirements::new_add_mode()),
             // This rule removes all existing `TransformPlanExec` nodes from the plan tree.
-            Arc::new(PhysicalExprResolver::new()),
+            Arc::new(ExecutionTransformationApplier::new()),
             Arc::new(AggregateStatistics::new()),
             // Statistics-based join selection will change the Auto mode to a real join implementation,
             // like collect left, or hash join, or future sort merge join, which will influence the
@@ -151,7 +152,9 @@ impl PhysicalOptimizer {
             // This rule prepares the physical plan for placeholder resolution by wrapping it in a
             // `TransformPlanExec` with a `ResolvePlaceholdersRule` if it contains any unresolved
             // placeholders.
-            Arc::new(PhysicalExprResolver::new_post_optimization()),
+            Arc::new(ExecutionTransformationApplier::new_post_optimization(
+                Arc::new(ResolvePlaceholdersRule::new()),
+            )),
             // This FilterPushdown handles dynamic filters that may have references to the source ExecutionPlan.
             // Therefore it should be run at the end of the optimization process since any changes to the plan may break the dynamic filter's references.
             // See `FilterPushdownPhase` for more details.

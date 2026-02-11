@@ -46,11 +46,7 @@ impl ExecutionTransformationRule for ResetAllRule {
         self
     }
 
-    fn clone_box(&self) -> Box<dyn ExecutionTransformationRule> {
-        Box::new(self.clone())
-    }
-
-    fn matches(&mut self, _node: &Arc<dyn ExecutionPlan>) -> Result<bool> {
+    fn matches(&self, _node: &Arc<dyn ExecutionPlan>) -> Result<bool> {
         Ok(true)
     }
 
@@ -77,11 +73,7 @@ impl ExecutionTransformationRule for ResetByNameRule {
         self
     }
 
-    fn clone_box(&self) -> Box<dyn ExecutionTransformationRule> {
-        Box::new(self.clone())
-    }
-
-    fn matches(&mut self, node: &Arc<dyn ExecutionPlan>) -> Result<bool> {
+    fn matches(&self, node: &Arc<dyn ExecutionPlan>) -> Result<bool> {
         Ok(node.name() == self.node_name)
     }
 
@@ -166,7 +158,7 @@ fn benchmark_with_transformer_exec(
     group: &mut BenchmarkGroup<'_, WallTime>,
     batch_label: &str,
     plan: &Arc<dyn ExecutionPlan>,
-    rules: &[Box<dyn ExecutionTransformationRule>],
+    rules: &[Arc<dyn ExecutionTransformationRule>],
     batch_size: BatchSize,
 ) {
     let ctx = Arc::new(TaskContext::default());
@@ -182,7 +174,7 @@ fn benchmark_with_transformer_exec(
                 || {
                     (
                         Arc::clone(plan),
-                        rules.iter().map(|r| r.clone_box()).collect(),
+                        rules.to_vec(),
                     )
                 },
                 |(plan, rules)| {
@@ -201,8 +193,7 @@ fn benchmark_with_transformer_exec(
         ),
         |b| {
             let plan = Arc::clone(plan);
-            let rules = rules.iter().map(|r| r.clone_box()).collect();
-            let transformer = Arc::new(TransformPlanExec::try_new(plan, rules).unwrap());
+            let transformer = Arc::new(TransformPlanExec::try_new(plan, rules.to_vec()).unwrap());
 
             b.iter_batched(
                 || Arc::clone(&transformer),
@@ -257,14 +248,14 @@ fn criterion_benchmark(c: &mut Criterion) {
 
         for count in rules_count {
             let reset_all_rules = (0..count)
-                .map(|_| Box::new(ResetAllRule {}) as Box<_>)
+                .map(|_| Arc::new(ResetAllRule {}) as _)
                 .collect::<Vec<_>>();
 
             let reset_one_rules = (0..count)
                 .map(|_| {
-                    Box::new(ResetByNameRule {
+                    Arc::new(ResetByNameRule {
                         node_name: "EmptyExec".to_string(),
-                    }) as Box<_>
+                    }) as _
                 })
                 .collect::<Vec<_>>();
 

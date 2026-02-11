@@ -2231,13 +2231,13 @@ impl protobuf::PhysicalPlanNode {
         let input: Arc<dyn ExecutionPlan> =
             into_physical_plan(&transform_plan.input, ctx, codec, proto_converter)?;
 
-        let mut rules: Vec<Box<dyn ExecutionTransformationRule>> =
+        let mut rules: Vec<Arc<dyn ExecutionTransformationRule>> =
             Vec::with_capacity(transform_plan.rules.len());
 
         for rule in transform_plan.rules.iter() {
             match &rule.rule_type {
                 Some(RuleType::ResolvePlaceholders(_)) => {
-                    rules.push(Box::new(ResolvePlaceholdersRule::new()))
+                    rules.push(Arc::new(ResolvePlaceholdersRule::new()))
                 }
                 Some(RuleType::Extension(ext)) => {
                     rules.push(codec.try_decode_transformation_rule(ext)?)
@@ -3799,7 +3799,7 @@ pub trait PhysicalExtensionCodec: Debug + Send + Sync {
     fn try_decode_transformation_rule(
         &self,
         _buf: &[u8],
-    ) -> Result<Box<dyn ExecutionTransformationRule>> {
+    ) -> Result<Arc<dyn ExecutionTransformationRule>> {
         not_impl_err!("PhysicalExtensionCodec is not provided")
     }
 
@@ -4248,7 +4248,7 @@ impl PhysicalExtensionCodec for ComposedPhysicalExtensionCodec {
     fn try_decode_transformation_rule(
         &self,
         buf: &[u8],
-    ) -> Result<Box<dyn ExecutionTransformationRule>> {
+    ) -> Result<Arc<dyn ExecutionTransformationRule>> {
         self.decode_protobuf(buf, |codec, data| {
             codec.try_decode_transformation_rule(data)
         })

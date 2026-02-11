@@ -437,7 +437,7 @@ mod tests {
         // Should be ValuesSource because of placeholder.
         assert!(values_exec.data_source().as_any().is::<ValuesSource>());
 
-        let rules = vec![Box::new(ResolvePlaceholdersRule::new()) as Box<_>];
+        let rules = vec![Arc::new(ResolvePlaceholdersRule::new()) as _];
         let exec = Arc::new(TransformPlanExec::try_new(values_exec, rules)?);
         let task_ctx = Arc::new(TaskContext::default().with_param_values(
             ParamValues::List(vec![ScalarValue::Int32(Some(10)).into()]),
@@ -470,7 +470,7 @@ mod tests {
         ]];
 
         let values_exec = ValuesSource::try_new_exec(Arc::clone(&schema), data)?;
-        let rules = vec![Box::new(ResolvePlaceholdersRule::new()) as Box<_>];
+        let rules = vec![Arc::new(ResolvePlaceholdersRule::new()) as _];
         let exec = Arc::new(TransformPlanExec::try_new(values_exec, rules)?) as Arc<_>;
 
         let task_ctx = Arc::new(TaskContext::default().with_param_values(
@@ -528,7 +528,7 @@ mod tests {
             vec![vec![lit(10), placeholder("$foo", DataType::Int32)]];
 
         let values_exec = ValuesSource::try_new_exec(Arc::clone(&schema), data)?;
-        let rules = vec![Box::new(ResolvePlaceholdersRule::new()) as Box<_>];
+        let rules = vec![Arc::new(ResolvePlaceholdersRule::new()) as _];
         let exec = Arc::new(TransformPlanExec::try_new(values_exec, rules)?) as Arc<_>;
 
         let task_ctx = Arc::new(TaskContext::default());

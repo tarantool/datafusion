@@ -15,11 +15,10 @@
 // specific language governing permissions and limitations
 // under the License.
 
-//! [`PhysicalExprResolver`] ensures that the physical plan is prepared for placeholder resolution
-//! by wrapping it in a [`TransformPlanExec`] with a [`ResolvePlaceholdersRule`] if the plan
-//! contains any unresolved placeholders. The actual resolution happens during execution.
+//! [`ExecutionTransformationApplier`] ensures that the required execution transformations
+//! are applied to the physical plan.
 
-use std::sync::Arc;
+use std::{borrow::Cow, sync::Arc};
 
 use datafusion_common::{
     Result,
@@ -28,62 +27,63 @@ use datafusion_common::{
 };
 use datafusion_physical_plan::{
     ExecutionPlan,
-    plan_transformer::{ResolvePlaceholdersRule, TransformPlanExec},
+    plan_transformer::{ExecutionTransformationRule, TransformPlanExec},
 };
 
 use crate::PhysicalOptimizerRule;
 
-/// The phase in which the [`PhysicalExprResolver`] rule is applied.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub enum PhysicalExprResolverPhase {
+/// The phase in which the [`ExecutionTransformationApplier`] rule is applied.
+#[derive(Debug)]
+pub enum ExecutionTransformationApplierPhase {
     /// Optimization that happens before most other optimizations.
     /// This optimization removes all [`TransformPlanExec`] execution plans from the plan
     /// tree.
     Pre,
     /// Optimization that happens after most other optimizations.
-    /// This optimization checks for the presence of placeholders in the optimized plan, and if
-    /// they are present, wraps the plan in a [`TransformPlanExec`] with a [`ResolvePlaceholdersRule`].
-    Post,
+    /// This optimization checks if `rule` requires to transform the plan and wraps the plan with
+    /// [`TransformPlanExec`] if it so, or adds rule to the existing transformation node.
+    Post {
+        rule: Arc<dyn ExecutionTransformationRule>,
+    },
 }
 
-/// Physical optimizer rule that prepares the plan for placeholder resolution during execution.
+/// Physical optimizer rule that wraps the plan with a certain execution-stage transformation.
 #[derive(Debug)]
-pub struct PhysicalExprResolver {
-    phase: PhysicalExprResolverPhase,
+pub struct ExecutionTransformationApplier {
+    phase: ExecutionTransformationApplierPhase,
+    name: Cow<'static, str>,
 }
 
-impl PhysicalExprResolver {
-    /// Creates a new [`PhysicalExprResolver`] optimizer rule that runs in the pre-optimization
-    /// phase. In this phase, the rule removes any existing [`TransformPlanExec`] from the
-    /// plan tree.
+impl ExecutionTransformationApplier {
+    /// Creates a new [`ExecutionTransformationApplier`] optimizer rule that runs in the
+    /// pre-optimization phase.
     pub fn new() -> Self {
         Self {
-            phase: PhysicalExprResolverPhase::Pre,
+            phase: ExecutionTransformationApplierPhase::Pre,
+            name: Cow::Borrowed("ExecutionTransformationApplier"),
         }
     }
 
-    /// Creates a new [`PhysicalExprResolver`] optimizer rule that runs in the post-optimization
-    /// phase. In this phase, the rule wraps the physical plan in a [`TransformPlanExec`] with a
-    /// [`ResolvePlaceholdersRule`] if the plan contains any unresolved placeholders.
-    pub fn new_post_optimization() -> Self {
+    /// Creates a new [`ExecutionTransformationApplier`] optimizer rule that runs in the
+    /// post-optimization phase.
+    pub fn new_post_optimization(rule: Arc<dyn ExecutionTransformationRule>) -> Self {
+        let name = format!("ExecutionTransformationApplier({})", rule.name());
         Self {
-            phase: PhysicalExprResolverPhase::Post,
+            phase: ExecutionTransformationApplierPhase::Post { rule },
+            name: name.into(),
         }
     }
 }
 
-impl Default for PhysicalExprResolver {
+impl Default for ExecutionTransformationApplier {
     fn default() -> Self {
         Self::new()
     }
 }
 
-impl PhysicalOptimizerRule for PhysicalExprResolver {
+impl PhysicalOptimizerRule for ExecutionTransformationApplier {
     fn name(&self) -> &str {
-        match self.phase {
-            PhysicalExprResolverPhase::Pre => "PhysicalExprResolver",
-            PhysicalExprResolverPhase::Post => "PhysicalExprResolver(Post)",
-        }
+        &self.name
     }
 
     fn optimize(
@@ -91,8 +91,8 @@ impl PhysicalOptimizerRule for PhysicalExprResolver {
         plan: Arc<dyn ExecutionPlan>,
         _config: &ConfigOptions,
     ) -> Result<Arc<dyn ExecutionPlan>> {
-        match self.phase {
-            PhysicalExprResolverPhase::Pre => plan
+        match &self.phase {
+            ExecutionTransformationApplierPhase::Pre => plan
                 .transform_up(|plan| {
                     if let Some(plan) = plan.as_any().downcast_ref::<TransformPlanExec>()
                     {
@@ -102,26 +102,22 @@ impl PhysicalOptimizerRule for PhysicalExprResolver {
                     }
                 })
                 .map(|t| t.data),
-            PhysicalExprResolverPhase::Post => {
+            ExecutionTransformationApplierPhase::Post { rule } => {
                 if let Some(transformer) =
                     plan.as_any().downcast_ref::<TransformPlanExec>()
                 {
-                    let resolves_placeholders =
-                        transformer.has_rule::<ResolvePlaceholdersRule>();
-
-                    if resolves_placeholders {
+                    let has_rule = transformer.has_dyn_rule(rule);
+                    if has_rule {
+                        // Rule is already applied.
                         Ok(plan)
                     } else {
                         transformer
-                            .add_rule(Box::new(ResolvePlaceholdersRule::new()))
+                            .add_rule(Arc::clone(rule))
                             .map(|r| Arc::new(r) as Arc<_>)
                     }
                 } else {
-                    let transformer = TransformPlanExec::try_new(
-                        plan,
-                        vec![Box::new(ResolvePlaceholdersRule::new())],
-                    )?;
-
+                    let transformer =
+                        TransformPlanExec::try_new(plan, vec![Arc::clone(rule)])?;
                     if transformer.plans_to_transform() > 0 {
                         Ok(Arc::new(transformer))
                     } else {

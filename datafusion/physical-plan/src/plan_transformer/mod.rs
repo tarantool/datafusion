@@ -60,11 +60,8 @@ pub trait ExecutionTransformationRule: Send + Sync + Debug {
     /// Returns the rule as [`Any`] so that it can be downcast to a specific implementation.
     fn as_any(&self) -> &dyn Any;
 
-    /// Clones this rule.
-    fn clone_box(&self) -> Box<dyn ExecutionTransformationRule>;
-
     /// Checks if the given [`ExecutionPlan`] node matches the criteria for this rule.
-    fn matches(&mut self, _node: &Arc<dyn ExecutionPlan>) -> Result<bool> {
+    fn matches(&self, _node: &Arc<dyn ExecutionPlan>) -> Result<bool> {
         Ok(false)
     }
 
@@ -91,12 +88,12 @@ struct TransformationPlan {
 /// Helper for building transformation plans for an [`ExecutionPlan`] tree during a single pass.
 struct TransformationPlanner {
     cursor: usize,
-    rules: Vec<Box<dyn ExecutionTransformationRule>>,
+    rules: Vec<Arc<dyn ExecutionTransformationRule>>,
     plans: Vec<TransformationPlan>,
 }
 
 impl TransformationPlanner {
-    fn new(rules: Vec<Box<dyn ExecutionTransformationRule>>) -> Self {
+    fn new(rules: Vec<Arc<dyn ExecutionTransformationRule>>) -> Self {
         Self {
             cursor: 0,
             rules,
@@ -140,14 +137,14 @@ impl<'n> TreeNodeVisitor<'n> for TransformationPlanner {
 /// rules.
 struct TransformationApplier<'rules, 'plans, 'ctx> {
     cursor: usize,
-    rules: &'rules [Box<dyn ExecutionTransformationRule>],
+    rules: &'rules [Arc<dyn ExecutionTransformationRule>],
     plans: &'plans [TransformationPlan],
     ctx: &'ctx TaskContext,
 }
 
 impl<'rules, 'plans, 'ctx> TransformationApplier<'rules, 'plans, 'ctx> {
     fn new(
-        rules: &'rules [Box<dyn ExecutionTransformationRule>],
+        rules: &'rules [Arc<dyn ExecutionTransformationRule>],
         plans: &'plans [TransformationPlan],
         ctx: &'ctx TaskContext,
     ) -> Self {
@@ -205,7 +202,7 @@ pub struct TransformPlanExec {
     /// The input execution plan.
     input: Arc<dyn ExecutionPlan>,
     /// The transformation rules to apply.
-    rules: Vec<Box<dyn ExecutionTransformationRule>>,
+    rules: Vec<Arc<dyn ExecutionTransformationRule>>,
     /// The pre-calculated transformation plans.
     plans: Vec<TransformationPlan>,
     /// Execution metrics.
@@ -219,7 +216,7 @@ impl TransformPlanExec {
     /// initial traversal of the input plan.
     pub fn try_new(
         input: Arc<dyn ExecutionPlan>,
-        rules: Vec<Box<dyn ExecutionTransformationRule>>,
+        rules: Vec<Arc<dyn ExecutionTransformationRule>>,
     ) -> Result<Self> {
         let mut planner = TransformationPlanner::new(rules);
         input.visit(&mut planner)?;
@@ -252,7 +249,7 @@ impl TransformPlanExec {
     }
 
     /// Returns the transformation rules.
-    pub fn rules(&self) -> &[Box<dyn ExecutionTransformationRule>] {
+    pub fn rules(&self) -> &[Arc<dyn ExecutionTransformationRule>] {
         &self.rules
     }
 
@@ -261,10 +258,15 @@ impl TransformPlanExec {
         self.rules.iter().any(|r| r.as_any().is::<T>())
     }
 
+    /// Checks if the transformation rules contains a specific rule.
+    pub fn has_dyn_rule(&self, rule: &Arc<dyn ExecutionTransformationRule>) -> bool {
+        self.rules.iter().any(|r| Arc::ptr_eq(r, rule))
+    }
+
     /// Adds a new transformation rule and recalculates transformation plans.
     pub fn add_rule(
         &self,
-        new_rule: Box<dyn ExecutionTransformationRule>,
+        new_rule: Arc<dyn ExecutionTransformationRule>,
     ) -> Result<Self> {
         self.add_rules(vec![new_rule])
     }
@@ -272,18 +274,14 @@ impl TransformPlanExec {
     /// Adds new transformation rules and recalculates transformation plans.
     pub fn add_rules(
         &self,
-        new_rules: Vec<Box<dyn ExecutionTransformationRule>>,
+        new_rules: Vec<Arc<dyn ExecutionTransformationRule>>,
     ) -> Result<Self> {
         let mut planner = TransformationPlanner::new(new_rules);
         self.input.visit(&mut planner)?;
         let new_rules = planner.rules;
         let new_plans = planner.plans;
 
-        let mut current_rules = self
-            .rules
-            .iter()
-            .map(|rule| rule.clone_box())
-            .collect::<Vec<_>>();
+        let mut current_rules = self.rules.clone();
 
         let offset = current_rules.len();
         current_rules.extend(new_rules);
@@ -394,10 +392,9 @@ impl ExecutionPlan for TransformPlanExec {
         self: Arc<Self>,
         children: Vec<Arc<dyn ExecutionPlan>>,
     ) -> Result<Arc<dyn ExecutionPlan>> {
-        let rules = self.rules.iter().map(|r| r.clone_box()).collect();
         Ok(Arc::new(TransformPlanExec::try_new(
             Arc::clone(&children[0]),
-            rules,
+            self.rules.clone(),
         )?))
     }
 
@@ -459,11 +456,7 @@ mod tests {
             self
         }
 
-        fn clone_box(&self) -> Box<dyn ExecutionTransformationRule> {
-            Box::new(self.clone())
-        }
-
-        fn matches(&mut self, node: &Arc<dyn ExecutionPlan>) -> Result<bool> {
+        fn matches(&self, node: &Arc<dyn ExecutionPlan>) -> Result<bool> {
             Ok(node.name() == self.match_name || self.match_name == "all")
         }
 
@@ -481,12 +474,12 @@ mod tests {
         let schema = Arc::new(Schema::empty());
         let input = Arc::new(EmptyExec::new(schema));
 
-        let resolve_rule = Box::new(ResolvePlaceholdersRule::new());
+        let resolve_rule = Arc::new(ResolvePlaceholdersRule::new());
         let exec = TransformPlanExec::try_new(input, vec![resolve_rule])?;
         assert!(exec.has_rule::<ResolvePlaceholdersRule>());
         assert!(!exec.has_rule::<MockRule>());
 
-        let exec = exec.add_rule(Box::new(MockRule {
+        let exec = exec.add_rule(Arc::new(MockRule {
             name: "mock".to_string(),
             match_name: "any".to_string(),
         }))?;
@@ -508,22 +501,23 @@ mod tests {
         // Node 1: CoalescePartitionsExec
         // Node 2: EmptyExec
 
-        let rule_a = Box::new(MockRule {
+        let rule_a: Arc<dyn ExecutionTransformationRule> = Arc::new(MockRule {
             name: "ruleA".to_string(),
             match_name: "CoalescePartitionsExec".to_string(),
         });
-        let exec = TransformPlanExec::try_new(Arc::clone(&input), vec![rule_a.clone()])?;
+        let exec =
+            TransformPlanExec::try_new(Arc::clone(&input), vec![Arc::clone(&rule_a)])?;
 
         assert_eq!(exec.rules.len(), 1);
         assert_eq!(exec.plans.len(), 1);
         assert_eq!(exec.plans[0].node_index, 1);
         assert_eq!(exec.plans[0].rule_indices, vec![0]);
 
-        let rule_b = Box::new(MockRule {
+        let rule_b: Arc<dyn ExecutionTransformationRule> = Arc::new(MockRule {
             name: "ruleB".to_string(),
             match_name: "GlobalLimitExec".to_string(),
         });
-        let exec = exec.add_rules(vec![rule_b.clone()])?;
+        let exec = exec.add_rules(vec![Arc::clone(&rule_b)])?;
 
         assert_eq!(exec.rules.len(), 2);
         assert_eq!(exec.plans.len(), 2);
@@ -532,11 +526,11 @@ mod tests {
         assert_eq!(exec.plans[1].node_index, 1);
         assert_eq!(exec.plans[1].rule_indices, vec![0]);
 
-        let rule_c = Box::new(MockRule {
+        let rule_c: Arc<dyn ExecutionTransformationRule> = Arc::new(MockRule {
             name: "ruleC".to_string(),
             match_name: "EmptyExec".to_string(),
         });
-        let exec = exec.add_rules(vec![rule_c.clone()])?;
+        let exec = exec.add_rules(vec![Arc::clone(&rule_c)])?;
 
         assert_eq!(exec.rules.len(), 3);
         assert_eq!(exec.plans.len(), 3);
@@ -547,12 +541,12 @@ mod tests {
         assert_eq!(exec.plans[2].node_index, 2);
         assert_eq!(exec.plans[2].rule_indices, vec![2]);
 
-        let rule_d = Box::new(MockRule {
+        let rule_d: Arc<dyn ExecutionTransformationRule> = Arc::new(MockRule {
             name: "ruleD".to_string(),
             match_name: "all".to_string(),
         });
 
-        let exec = exec.add_rules(vec![rule_d.clone()])?;
+        let exec = exec.add_rules(vec![Arc::clone(&rule_d)])?;
         let check_full_plan = |exec: TransformPlanExec| {
             assert_eq!(exec.rules.len(), 4);
             assert_eq!(exec.plans.len(), 3);
@@ -569,10 +563,10 @@ mod tests {
         let exec = TransformPlanExec::try_new(
             Arc::clone(&input),
             vec![
-                rule_a.clone(),
-                rule_b.clone(),
-                rule_c.clone(),
-                rule_d.clone(),
+                Arc::clone(&rule_a),
+                Arc::clone(&rule_b),
+                Arc::clone(&rule_c),
+                Arc::clone(&rule_d),
             ],
         )?;
 
@@ -610,7 +604,7 @@ mod tests {
         let projection = ProjectionExec::try_new(vec![projection_expr], row)?;
         let transformer = TransformPlanExec::try_new(
             Arc::new(projection),
-            vec![Box::new(ResolvePlaceholdersRule::new())],
+            vec![Arc::new(ResolvePlaceholdersRule::new())],
         )?;
 
         let param_values = ParamValues::List(vec![ScalarValue::Int32(Some(20)).into()]);

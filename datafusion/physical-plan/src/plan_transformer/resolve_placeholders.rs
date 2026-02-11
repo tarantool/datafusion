@@ -56,11 +56,7 @@ impl ExecutionTransformationRule for ResolvePlaceholdersRule {
         self
     }
 
-    fn clone_box(&self) -> Box<dyn ExecutionTransformationRule> {
-        Box::new(Self {})
-    }
-
-    fn matches(&mut self, node: &Arc<dyn ExecutionPlan>) -> Result<bool> {
+    fn matches(&self, node: &Arc<dyn ExecutionPlan>) -> Result<bool> {
         let Some(exprs) = node.physical_expressions() else {
             return Ok(false);
         };

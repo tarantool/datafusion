@@ -15,7 +15,7 @@
 // specific language governing permissions and limitations
 // under the License.
 
-//! Integration tests for [`PhysicalExprResolver`] optimizer rule.
+//! Integration tests for [`ExecutionTransformationApplier`] optimizer rule.
 
 use std::{collections::HashMap, sync::Arc};
 
@@ -29,11 +29,14 @@ use datafusion_physical_expr::{
     expressions::{BinaryExpr, col, lit, placeholder},
 };
 use datafusion_physical_optimizer::{
-    PhysicalOptimizerRule, physical_expr_resolver::PhysicalExprResolver,
+    PhysicalOptimizerRule, exec_transform_apply::ExecutionTransformationApplier,
 };
 use datafusion_physical_plan::{
-    ExecutionPlan, filter::FilterExec, get_plan_string,
-    plan_transformer::TransformPlanExec, repartition::RepartitionExec,
+    ExecutionPlan,
+    filter::FilterExec,
+    get_plan_string,
+    plan_transformer::{ResolvePlaceholdersRule, TransformPlanExec},
+    repartition::RepartitionExec,
 };
 
 use crate::physical_optimizer::test_utils::{
@@ -85,6 +88,12 @@ fn repartition_exec(
     )?))
 }
 
+fn placeholder_resolver() -> ExecutionTransformationApplier {
+    ExecutionTransformationApplier::new_post_optimization(Arc::new(
+        ResolvePlaceholdersRule::new(),
+    ))
+}
+
 #[test]
 fn test_noop_if_no_placeholders_found() -> Result<()> {
     let schema = create_schema();
@@ -105,8 +114,7 @@ fn test_noop_if_no_placeholders_found() -> Result<()> {
 
     assert_eq!(initial, expected_initial);
 
-    let after_optimize = PhysicalExprResolver::new_post_optimization()
-        .optimize(plan, &ConfigOptions::new())?;
+    let after_optimize = placeholder_resolver().optimize(plan, &ConfigOptions::new())?;
 
     let optimized_plan_string = get_plan_string(&after_optimize);
     assert_eq!(initial, optimized_plan_string);
@@ -134,8 +142,7 @@ fn test_wrap_plan_with_transformer() -> Result<()> {
 
     assert_eq!(initial, expected_initial);
 
-    let after_optimize = PhysicalExprResolver::new_post_optimization()
-        .optimize(plan, &ConfigOptions::new())?;
+    let after_optimize = placeholder_resolver().optimize(plan, &ConfigOptions::new())?;
 
     let expected_optimized = [
         "TransformPlanExec: rules=[ResolvePlaceholders: plans_to_modify=1]",
@@ -201,7 +208,7 @@ fn test_remove_useless_transformers() -> Result<()> {
     assert_eq!(initial, expected_initial);
 
     let after_optimize =
-        PhysicalExprResolver::new().optimize(plan, &ConfigOptions::new())?;
+        ExecutionTransformationApplier::new().optimize(plan, &ConfigOptions::new())?;
 
     let expected_optimized = [
         "GlobalLimitExec: skip=0, fetch=5",
@@ -244,7 +251,7 @@ fn test_combine_transformers() -> Result<()> {
     assert_eq!(initial, expected_initial);
 
     let after_pre_optimization =
-        PhysicalExprResolver::new().optimize(plan, &ConfigOptions::new())?;
+        ExecutionTransformationApplier::new().optimize(plan, &ConfigOptions::new())?;
 
     let expected_optimized = [
         "GlobalLimitExec: skip=0, fetch=5",
@@ -257,8 +264,8 @@ fn test_combine_transformers() -> Result<()> {
     let optimized_plan_string = get_plan_string(&after_pre_optimization);
     assert_eq!(optimized_plan_string, expected_optimized);
 
-    let after_post_optimization = PhysicalExprResolver::new_post_optimization()
-        .optimize(after_pre_optimization, &ConfigOptions::new())?;
+    let after_post_optimization =
+        placeholder_resolver().optimize(after_pre_optimization, &ConfigOptions::new())?;
 
     let expected_optimized = [
         "TransformPlanExec: rules=[ResolvePlaceholders: plans_to_modify=1]",
