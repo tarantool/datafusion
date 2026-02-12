@@ -19,7 +19,7 @@ use std::collections::HashMap;
 
 use super::*;
 use datafusion_common::{ParamValues, ScalarValue, metadata::ScalarAndMetadata};
-use datafusion_execution::TaskContext;
+use datafusion_physical_plan::execution_plan::prepare_execution;
 use insta::assert_snapshot;
 
 #[tokio::test]
@@ -446,8 +446,8 @@ async fn test_resolve_window_function() -> Result<()> {
         .await?;
 
     let param_values = ParamValues::List(vec![ScalarValue::Int32(Some(100)).into()]);
-    let task_ctx = Arc::new(TaskContext::from(&ctx).with_param_values(param_values));
-    let batches = collect(plan, task_ctx).await?;
+    let plan = prepare_execution(plan, Some(&param_values))?;
+    let batches = collect(plan, ctx.task_ctx()).await?;
 
     assert_snapshot!(batches_to_sort_string(&batches), @r"
     +----+--------------------------------------------------------------------------------------------------------------------------+
@@ -486,8 +486,8 @@ async fn test_resolve_join() -> Result<()> {
         .await?;
 
     let param_values = ParamValues::List(vec![ScalarValue::Int32(Some(8)).into()]);
-    let task_ctx = Arc::new(TaskContext::from(&ctx).with_param_values(param_values));
-    let batches = collect(plan, task_ctx).await?;
+    let plan = prepare_execution(plan, Some(&param_values))?;
+    let batches = collect(plan, ctx.task_ctx()).await?;
 
     assert_snapshot!(batches_to_sort_string(&batches), @r"
     +------+-----+
@@ -512,15 +512,12 @@ async fn test_resolve_cast() -> Result<()> {
     let param_values = ParamValues::List(vec![
         ScalarValue::Utf8(Some("not a number".to_string())).into(),
     ]);
-
-    let task_ctx = Arc::new(TaskContext::from(&ctx).with_param_values(param_values));
-    let result = collect(Arc::clone(&plan), task_ctx).await;
-    assert!(result.is_err());
+    assert!(prepare_execution(Arc::clone(&plan), Some(&param_values)).is_err());
 
     let param_values =
         ParamValues::List(vec![ScalarValue::Utf8(Some("200".to_string())).into()]);
-    let task_ctx = Arc::new(TaskContext::from(&ctx).with_param_values(param_values));
-    let batches = collect(plan, task_ctx).await?;
+    let plan = prepare_execution(plan, Some(&param_values))?;
+    let batches = collect(plan, ctx.task_ctx()).await?;
 
     assert_snapshot!(batches_to_sort_string(&batches), @r"
     +-----+
@@ -545,9 +542,8 @@ async fn test_resolve_try_cast() -> Result<()> {
     let param_values = ParamValues::List(vec![
         ScalarValue::Utf8(Some("not a number".to_string())).into(),
     ]);
-
-    let task_ctx = Arc::new(TaskContext::from(&ctx).with_param_values(param_values));
-    let batches = collect(Arc::clone(&plan), task_ctx).await?;
+    let plan1 = prepare_execution(Arc::clone(&plan), Some(&param_values))?;
+    let batches = collect(plan1, ctx.task_ctx()).await?;
 
     assert_snapshot!(batches_to_sort_string(&batches), @r"
     +----+
@@ -559,8 +555,8 @@ async fn test_resolve_try_cast() -> Result<()> {
 
     let param_values =
         ParamValues::List(vec![ScalarValue::Utf8(Some("200".to_string())).into()]);
-    let task_ctx = Arc::new(TaskContext::from(&ctx).with_param_values(param_values));
-    let batches = collect(plan, task_ctx).await?;
+    let plan2 = prepare_execution(plan, Some(&param_values))?;
+    let batches = collect(plan2, ctx.task_ctx()).await?;
 
     assert_snapshot!(batches_to_sort_string(&batches), @r"
     +-----+

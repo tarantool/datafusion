@@ -59,9 +59,6 @@ use datafusion_physical_plan::filter::FilterExec;
 use datafusion_physical_plan::joins::utils::{JoinFilter, JoinOn};
 use datafusion_physical_plan::joins::{HashJoinExec, PartitionMode, SortMergeJoinExec};
 use datafusion_physical_plan::limit::{GlobalLimitExec, LocalLimitExec};
-use datafusion_physical_plan::plan_transformer::{
-    ResolvePlaceholdersRule, TransformPlanExec,
-};
 use datafusion_physical_plan::projection::{ProjectionExec, ProjectionExpr};
 use datafusion_physical_plan::repartition::RepartitionExec;
 use datafusion_physical_plan::sorts::sort::SortExec;
@@ -394,15 +391,6 @@ pub fn projection_exec(
         .map(|(expr, alias)| ProjectionExpr { expr, alias })
         .collect();
     Ok(Arc::new(ProjectionExec::try_new(proj_exprs, input)?))
-}
-
-pub fn resolve_placeholders_exec(
-    input: Arc<dyn ExecutionPlan>,
-) -> Arc<dyn ExecutionPlan> {
-    Arc::new(
-        TransformPlanExec::try_new(input, vec![Arc::new(ResolvePlaceholdersRule::new())])
-            .unwrap(),
-    )
 }
 
 /// A test [`ExecutionPlan`] whose requirements can be configured.

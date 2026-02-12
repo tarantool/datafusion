@@ -23,6 +23,7 @@ use datafusion::prelude::SessionContext;
 use datafusion_catalog::MemTable;
 use datafusion_physical_plan::ExecutionPlan;
 use datafusion_physical_plan::displayable;
+use datafusion_physical_plan::execution_plan::prepare_execution;
 use datafusion_physical_plan::execution_plan::reset_plan_states;
 use tokio::runtime::Runtime;
 
@@ -194,5 +195,41 @@ fn bench_reset_plan_states(c: &mut Criterion) {
     c.bench_function("query3", bench_query!(query3));
 }
 
-criterion_group!(benches, bench_reset_plan_states);
+fn run_prepare_execution(b: &mut criterion::Bencher, plan: &Arc<dyn ExecutionPlan>) {
+    b.iter(|| std::hint::black_box(prepare_execution(Arc::clone(plan), None).unwrap()));
+}
+
+/// Benchmark is intended to measure overhead of actions, required to perform
+/// making an independent instance of the execution plan to re-execute it with placeholders,
+/// avoiding re-planning stage.
+fn bench_prepare_execution(c: &mut Criterion) {
+    let rt = Runtime::new().unwrap();
+    let ctx = SessionContext::new();
+    ctx.register_table(
+        "t",
+        Arc::new(MemTable::try_new(Arc::clone(&SCHEMA), vec![vec![], vec![]]).unwrap()),
+    )
+    .unwrap();
+
+    ctx.register_table(
+        "v",
+        Arc::new(MemTable::try_new(Arc::clone(&SCHEMA), vec![vec![], vec![]]).unwrap()),
+    )
+    .unwrap();
+
+    macro_rules! bench_query {
+        ($query_producer: expr) => {{
+            let sql = $query_producer();
+            let plan = physical_plan(&ctx, &rt, &sql);
+            log::debug!("plan:\n{}", displayable(plan.as_ref()).indent(true));
+            move |b| run_prepare_execution(b, &plan)
+        }};
+    }
+
+    c.bench_function("query1", bench_query!(query1));
+    c.bench_function("query2", bench_query!(query2));
+    c.bench_function("query3", bench_query!(query3));
+}
+
+criterion_group!(benches, bench_reset_plan_states, bench_prepare_execution);
 criterion_main!(benches);

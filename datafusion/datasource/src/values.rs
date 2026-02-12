@@ -341,8 +341,7 @@ mod tests {
     use datafusion_expr::Operator;
     use datafusion_physical_expr::expressions::{BinaryExpr, lit, placeholder};
     use datafusion_physical_plan::{
-        ExecutionPlan, collect,
-        plan_transformer::{ResolvePlaceholdersRule, TransformPlanExec},
+        ExecutionPlan, collect, execution_plan::prepare_execution,
     };
 
     #[test]
@@ -437,11 +436,13 @@ mod tests {
         // Should be ValuesSource because of placeholder.
         assert!(values_exec.data_source().as_any().is::<ValuesSource>());
 
-        let rules = vec![Arc::new(ResolvePlaceholdersRule::new()) as _];
-        let exec = Arc::new(TransformPlanExec::try_new(values_exec, rules)?);
-        let task_ctx = Arc::new(TaskContext::default().with_param_values(
-            ParamValues::List(vec![ScalarValue::Int32(Some(10)).into()]),
-        ));
+        let exec = prepare_execution(
+            values_exec,
+            Some(&ParamValues::List(vec![
+                ScalarValue::Int32(Some(10)).into(),
+            ])),
+        )?;
+        let task_ctx = Arc::new(TaskContext::default());
 
         let batch = collect(exec, task_ctx).await?;
         let expected = [
@@ -469,18 +470,18 @@ mod tests {
             placeholder("$2", DataType::Int32),
         ]];
 
-        let values_exec = ValuesSource::try_new_exec(Arc::clone(&schema), data)?;
-        let rules = vec![Arc::new(ResolvePlaceholdersRule::new()) as _];
-        let exec = Arc::new(TransformPlanExec::try_new(values_exec, rules)?) as Arc<_>;
-
-        let task_ctx = Arc::new(TaskContext::default().with_param_values(
-            ParamValues::List(vec![
+        let values_exec = ValuesSource::try_new_exec(Arc::clone(&schema), data)? as _;
+        let exec = prepare_execution(
+            Arc::clone(&values_exec),
+            Some(&ParamValues::List(vec![
                 ScalarValue::Int32(Some(10)).into(),
                 ScalarValue::Int32(Some(20)).into(),
-            ]),
-        ));
+            ])),
+        )?;
 
-        let batch = collect(Arc::clone(&exec), task_ctx).await?;
+        let task_ctx = Arc::new(TaskContext::default());
+
+        let batch = collect(Arc::clone(&exec), Arc::clone(&task_ctx)).await?;
         let expected = [
             "+----+----+",
             "| a  | b  |",
@@ -490,12 +491,13 @@ mod tests {
         ];
         assert_batches_eq!(expected, &batch);
 
-        let task_ctx = Arc::new(TaskContext::default().with_param_values(
-            ParamValues::List(vec![
+        let exec = prepare_execution(
+            values_exec,
+            Some(&ParamValues::List(vec![
                 ScalarValue::Int32(Some(30)).into(),
                 ScalarValue::Int32(Some(40)).into(),
-            ]),
-        ));
+            ])),
+        )?;
 
         let batch = collect(exec, task_ctx).await?;
         let expected = [
@@ -527,21 +529,21 @@ mod tests {
         let data: Vec<Vec<Arc<dyn PhysicalExpr>>> =
             vec![vec![lit(10), placeholder("$foo", DataType::Int32)]];
 
-        let values_exec = ValuesSource::try_new_exec(Arc::clone(&schema), data)?;
-        let rules = vec![Arc::new(ResolvePlaceholdersRule::new()) as _];
-        let exec = Arc::new(TransformPlanExec::try_new(values_exec, rules)?) as Arc<_>;
+        let values_exec = ValuesSource::try_new_exec(Arc::clone(&schema), data)? as _;
 
         let task_ctx = Arc::new(TaskContext::default());
-        let result = collect(Arc::clone(&exec), task_ctx).await;
+        let result = collect(Arc::clone(&values_exec), task_ctx).await;
         assert!(result.is_err());
 
-        let task_ctx = Arc::new(TaskContext::default().with_param_values(
-            ParamValues::Map(HashMap::from_iter([(
+        let exec = prepare_execution(
+            values_exec,
+            Some(&ParamValues::Map(HashMap::from_iter([(
                 "foo".to_string(),
                 ScalarValue::Int32(Some(20)).into(),
-            )])),
-        ));
+            )]))),
+        )?;
 
+        let task_ctx = Arc::new(TaskContext::default());
         let batch = collect(Arc::clone(&exec), task_ctx).await?;
         let expected = [
             "+----+----+",

@@ -31,6 +31,7 @@ pub use datafusion_common::utils::project_schema;
 pub use datafusion_common::{ColumnStatistics, Statistics, internal_err};
 pub use datafusion_execution::{RecordBatchStream, SendableRecordBatchStream};
 pub use datafusion_expr::{Accumulator, ColumnarValue};
+use datafusion_physical_expr::expressions::resolve_expr_placeholders;
 pub use datafusion_physical_expr::window::WindowExpr;
 pub use datafusion_physical_expr::{
     Distribution, Partitioning, PhysicalExpr, expressions,
@@ -50,7 +51,7 @@ use arrow::array::{Array, RecordBatch};
 use arrow::datatypes::SchemaRef;
 use datafusion_common::config::ConfigOptions;
 use datafusion_common::{
-    Constraints, DataFusionError, Result, assert_eq_or_internal_err,
+    Constraints, DataFusionError, ParamValues, Result, assert_eq_or_internal_err,
     assert_or_internal_err, exec_err,
 };
 use datafusion_common_runtime::JoinSet;
@@ -1554,6 +1555,53 @@ pub fn reset_plan_states(plan: Arc<dyn ExecutionPlan>) -> Result<Arc<dyn Executi
         Ok(Transformed::yes(new_plan))
     })
     .data()
+}
+
+/// Prepare plan that possiblty contains placeholder to be executed. This function makes
+/// passed plan clone where placeholders are resolved and state is reset.
+///
+/// # Limitations
+///
+/// While this function enables plan reuse, it does not allow the same plan to be executed if it (OR):
+///
+/// * uses dynamic filters,
+/// * represents a recursive query.
+///
+pub fn prepare_execution(
+    plan: Arc<dyn ExecutionPlan>,
+    param_values: Option<&ParamValues>,
+) -> Result<Arc<dyn ExecutionPlan>> {
+    plan.transform_up(|plan| {
+        let plan = if let Some(iter) = plan.physical_expressions() {
+            let mut has_placeholders = false;
+            let exprs = iter
+                .map(|expr| {
+                    let resolved_expr =
+                        resolve_expr_placeholders(Arc::clone(&expr), param_values)?;
+                    has_placeholders |= !Arc::ptr_eq(&expr, &resolved_expr);
+                    Ok(resolved_expr)
+                })
+                .collect::<Result<Vec<_>>>()?;
+            if !has_placeholders {
+                Arc::clone(&plan).reset_state()?
+            } else {
+                // `with_physical_expressions` resets plan state.
+                let Some(plan) =
+                    plan.with_physical_expressions(ReplacePhysicalExpr { exprs })?
+                else {
+                    return exec_err!(
+                        "plan {} does not support expression substitution",
+                        plan.name()
+                    );
+                };
+                plan
+            }
+        } else {
+            plan.reset_state()?
+        };
+        Ok(Transformed::yes(plan))
+    })
+    .map(|tnr| tnr.data)
 }
 
 /// Utility function yielding a string representation of the given [`ExecutionPlan`].

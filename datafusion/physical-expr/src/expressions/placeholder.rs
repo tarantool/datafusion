@@ -28,11 +28,42 @@ use arrow::{
     datatypes::{DataType, Field, FieldRef, Schema},
 };
 use datafusion_common::{
-    DataFusionError, Result, exec_datafusion_err, tree_node::TreeNode,
+    DataFusionError, ParamValues, Result, exec_datafusion_err, exec_err,
+    tree_node::{Transformed, TreeNode},
 };
 use datafusion_expr::ColumnarValue;
 use datafusion_physical_expr_common::physical_expr::PhysicalExpr;
 use std::hash::Hash;
+
+use crate::{expressions::Literal, simplifier::const_evaluator::simplify_const_expr};
+
+/// Resolves [`PlaceholderExpr`] in the physical expression using the provided [`ParamValues`].
+pub fn resolve_expr_placeholders(
+    expr: Arc<dyn PhysicalExpr>,
+    param_values: Option<&ParamValues>,
+) -> Result<Arc<dyn PhysicalExpr>> {
+    let expr = expr.transform_up(|node| {
+        let Some(placeholder) = node.as_any().downcast_ref::<PlaceholderExpr>() else {
+            return Ok(Transformed::no(node));
+        };
+        let Some(ref field) = placeholder.field else {
+            return Ok(Transformed::no(node));
+        };
+        let Some(param_values) = param_values else {
+            return exec_err!("value for placeholder {} is not found", placeholder.id);
+        };
+        let scalar = param_values.get_placeholders_with_values(&placeholder.id)?;
+        let value = scalar.value.cast_to(field.data_type())?;
+        let literal = Literal::new_with_metadata(value, scalar.metadata);
+        Ok(Transformed::yes(Arc::new(literal)))
+    })?;
+
+    if expr.transformed {
+        simplify_const_expr(expr.data).map(|t| t.data)
+    } else {
+        Ok(expr.data)
+    }
+}
 
 /// Physical expression representing a placeholder parameter (e.g., $1, $2, or named parameters) in
 /// the physical plan.
