@@ -1667,9 +1667,9 @@ impl ExecutionPlan for AggregateExec {
         }
 
         Ok(Some(Arc::new(Self {
-            group_by,
-            aggr_expr,
-            filter_expr,
+            group_by: Arc::new(group_by),
+            aggr_expr: aggr_expr.into(),
+            filter_expr: filter_expr.into(),
             dynamic_filter: None,
             metrics: ExecutionPlanMetricsSet::new(),
             ..self.clone()
