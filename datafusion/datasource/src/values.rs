@@ -341,7 +341,7 @@ mod tests {
     use datafusion_expr::Operator;
     use datafusion_physical_expr::expressions::{BinaryExpr, lit, placeholder};
     use datafusion_physical_plan::{
-        ExecutionPlan, collect, execution_plan::prepare_execution,
+        ExecutionPlan, collect, reuse::ReusableExecutionPlan,
     };
 
     #[test]
@@ -436,15 +436,17 @@ mod tests {
         // Should be ValuesSource because of placeholder.
         assert!(values_exec.data_source().as_any().is::<ValuesSource>());
 
-        let exec = prepare_execution(
-            values_exec,
-            Some(&ParamValues::List(vec![
-                ScalarValue::Int32(Some(10)).into(),
-            ])),
-        )?;
+        let exec = ReusableExecutionPlan::new(values_exec as _);
         let task_ctx = Arc::new(TaskContext::default());
 
-        let batch = collect(exec, task_ctx).await?;
+        let batch = collect(
+            exec.bind(Some(&ParamValues::List(vec![
+                ScalarValue::Int32(Some(10)).into(),
+            ])))?
+            .plan(),
+            task_ctx,
+        )
+        .await?;
         let expected = [
             "+-----+----+",
             "| a   | b  |",
@@ -471,17 +473,19 @@ mod tests {
         ]];
 
         let values_exec = ValuesSource::try_new_exec(Arc::clone(&schema), data)? as _;
-        let exec = prepare_execution(
-            Arc::clone(&values_exec),
-            Some(&ParamValues::List(vec![
-                ScalarValue::Int32(Some(10)).into(),
-                ScalarValue::Int32(Some(20)).into(),
-            ])),
-        )?;
+        let exec = ReusableExecutionPlan::new(values_exec);
 
         let task_ctx = Arc::new(TaskContext::default());
 
-        let batch = collect(Arc::clone(&exec), Arc::clone(&task_ctx)).await?;
+        let batch = collect(
+            exec.bind(Some(&ParamValues::List(vec![
+                ScalarValue::Int32(Some(10)).into(),
+                ScalarValue::Int32(Some(20)).into(),
+            ])))?
+            .plan(),
+            Arc::clone(&task_ctx),
+        )
+        .await?;
         let expected = [
             "+----+----+",
             "| a  | b  |",
@@ -491,15 +495,15 @@ mod tests {
         ];
         assert_batches_eq!(expected, &batch);
 
-        let exec = prepare_execution(
-            values_exec,
-            Some(&ParamValues::List(vec![
+        let batch = collect(
+            exec.bind(Some(&ParamValues::List(vec![
                 ScalarValue::Int32(Some(30)).into(),
                 ScalarValue::Int32(Some(40)).into(),
-            ])),
-        )?;
-
-        let batch = collect(exec, task_ctx).await?;
+            ])))?
+            .plan(),
+            task_ctx,
+        )
+        .await?;
         let expected = [
             "+----+----+",
             "| a  | b  |",
@@ -535,16 +539,18 @@ mod tests {
         let result = collect(Arc::clone(&values_exec), task_ctx).await;
         assert!(result.is_err());
 
-        let exec = prepare_execution(
-            values_exec,
-            Some(&ParamValues::Map(HashMap::from_iter([(
-                "foo".to_string(),
-                ScalarValue::Int32(Some(20)).into(),
-            )]))),
-        )?;
+        let exec = ReusableExecutionPlan::new(values_exec);
 
         let task_ctx = Arc::new(TaskContext::default());
-        let batch = collect(Arc::clone(&exec), task_ctx).await?;
+        let batch = collect(
+            exec.bind(Some(&ParamValues::Map(HashMap::from_iter([(
+                "foo".to_string(),
+                ScalarValue::Int32(Some(20)).into(),
+            )]))))?
+            .plan(),
+            task_ctx,
+        )
+        .await?;
         let expected = [
             "+----+----+",
             "| a  | b  |",

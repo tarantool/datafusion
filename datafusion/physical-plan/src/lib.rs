@@ -84,6 +84,7 @@ pub mod placeholder_row;
 pub mod projection;
 pub mod recursive_query;
 pub mod repartition;
+pub mod reuse;
 pub mod sort_pushdown;
 pub mod sorts;
 pub mod spill;

@@ -753,7 +753,7 @@ impl ExecutionPlan for NestedLoopJoinExec {
             column_indices: self.column_indices.clone(),
             projection: self.projection.clone(),
             metrics: Default::default(),
-            cache: self.cache.clone(),
+            cache: Arc::clone(&self.cache),
         })))
     }
 }

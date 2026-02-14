@@ -19,7 +19,7 @@ use std::collections::HashMap;
 
 use super::*;
 use datafusion_common::{ParamValues, ScalarValue, metadata::ScalarAndMetadata};
-use datafusion_physical_plan::execution_plan::prepare_execution;
+use datafusion_physical_plan::reuse::ReusableExecutionPlan;
 use insta::assert_snapshot;
 
 #[tokio::test]
@@ -439,15 +439,15 @@ async fn test_resolve_window_function() -> Result<()> {
     let batch = record_batch!(("id", Int32, [1, 2]), ("name", Utf8, ["Alex", "Bob"]))?;
     ctx.register_batch("t1", batch)?;
 
-    let plan = ctx
-        .sql("SELECT id, SUM(id + $1) OVER (PARTITION BY name ORDER BY id) FROM t1")
-        .await?
-        .create_physical_plan()
-        .await?;
+    let plan = ReusableExecutionPlan::new(
+        ctx.sql("SELECT id, SUM(id + $1) OVER (PARTITION BY name ORDER BY id) FROM t1")
+            .await?
+            .create_physical_plan()
+            .await?,
+    );
 
     let param_values = ParamValues::List(vec![ScalarValue::Int32(Some(100)).into()]);
-    let plan = prepare_execution(plan, Some(&param_values))?;
-    let batches = collect(plan, ctx.task_ctx()).await?;
+    let batches = collect(plan.bind(Some(&param_values))?.plan(), ctx.task_ctx()).await?;
 
     assert_snapshot!(batches_to_sort_string(&batches), @r"
     +----+--------------------------------------------------------------------------------------------------------------------------+
@@ -479,15 +479,15 @@ async fn test_resolve_join() -> Result<()> {
     ctx.register_batch("t1", batch_1)?;
     ctx.register_batch("t2", batch_2)?;
 
-    let plan = ctx
-        .sql("SELECT t1.name, t2.age FROM t1 JOIN t2 ON t1.id + $1 = t2.id;")
-        .await?
-        .create_physical_plan()
-        .await?;
+    let plan = ReusableExecutionPlan::new(
+        ctx.sql("SELECT t1.name, t2.age FROM t1 JOIN t2 ON t1.id + $1 = t2.id;")
+            .await?
+            .create_physical_plan()
+            .await?,
+    );
 
     let param_values = ParamValues::List(vec![ScalarValue::Int32(Some(8)).into()]);
-    let plan = prepare_execution(plan, Some(&param_values))?;
-    let batches = collect(plan, ctx.task_ctx()).await?;
+    let batches = collect(plan.bind(Some(&param_values))?.plan(), ctx.task_ctx()).await?;
 
     assert_snapshot!(batches_to_sort_string(&batches), @r"
     +------+-----+
@@ -503,21 +503,21 @@ async fn test_resolve_join() -> Result<()> {
 #[tokio::test]
 async fn test_resolve_cast() -> Result<()> {
     let ctx = SessionContext::new();
-    let plan = ctx
-        .sql("SELECT CAST($1 as INT)")
-        .await?
-        .create_physical_plan()
-        .await?;
+    let plan = ReusableExecutionPlan::new(
+        ctx.sql("SELECT CAST($1 as INT)")
+            .await?
+            .create_physical_plan()
+            .await?,
+    );
 
     let param_values = ParamValues::List(vec![
         ScalarValue::Utf8(Some("not a number".to_string())).into(),
     ]);
-    assert!(prepare_execution(Arc::clone(&plan), Some(&param_values)).is_err());
+    assert!(plan.bind(Some(&param_values)).is_err());
 
     let param_values =
         ParamValues::List(vec![ScalarValue::Utf8(Some("200".to_string())).into()]);
-    let plan = prepare_execution(plan, Some(&param_values))?;
-    let batches = collect(plan, ctx.task_ctx()).await?;
+    let batches = collect(plan.bind(Some(&param_values))?.plan(), ctx.task_ctx()).await?;
 
     assert_snapshot!(batches_to_sort_string(&batches), @r"
     +-----+
@@ -533,17 +533,17 @@ async fn test_resolve_cast() -> Result<()> {
 #[tokio::test]
 async fn test_resolve_try_cast() -> Result<()> {
     let ctx = SessionContext::new();
-    let plan = ctx
-        .sql("SELECT TRY_CAST($1 as INT)")
-        .await?
-        .create_physical_plan()
-        .await?;
+    let plan = ReusableExecutionPlan::new(
+        ctx.sql("SELECT TRY_CAST($1 as INT)")
+            .await?
+            .create_physical_plan()
+            .await?,
+    );
 
     let param_values = ParamValues::List(vec![
         ScalarValue::Utf8(Some("not a number".to_string())).into(),
     ]);
-    let plan1 = prepare_execution(Arc::clone(&plan), Some(&param_values))?;
-    let batches = collect(plan1, ctx.task_ctx()).await?;
+    let batches = collect(plan.bind(Some(&param_values))?.plan(), ctx.task_ctx()).await?;
 
     assert_snapshot!(batches_to_sort_string(&batches), @r"
     +----+
@@ -555,8 +555,7 @@ async fn test_resolve_try_cast() -> Result<()> {
 
     let param_values =
         ParamValues::List(vec![ScalarValue::Utf8(Some("200".to_string())).into()]);
-    let plan2 = prepare_execution(plan, Some(&param_values))?;
-    let batches = collect(plan2, ctx.task_ctx()).await?;
+    let batches = collect(plan.bind(Some(&param_values))?.plan(), ctx.task_ctx()).await?;
 
     assert_snapshot!(batches_to_sort_string(&batches), @r"
     +-----+

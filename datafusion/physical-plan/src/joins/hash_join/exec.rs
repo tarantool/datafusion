@@ -1537,7 +1537,7 @@ impl ExecutionPlan for HashJoinExec {
             column_indices: self.column_indices.clone(),
             null_equality: self.null_equality,
             null_aware: self.null_aware,
-            cache: self.cache.clone(),
+            cache: Arc::clone(&self.cache),
             // Reset dynamic filter and bounds accumulator to initial state
             dynamic_filter: None,
         })))

@@ -15,16 +15,20 @@
 // specific language governing permissions and limitations
 // under the License.
 
+use std::cell::OnceCell;
 use std::sync::{Arc, LazyLock};
 
 use arrow_schema::{DataType, Field, Fields, Schema, SchemaRef};
+use criterion::measurement::WallTime;
 use criterion::{Criterion, criterion_group, criterion_main};
 use datafusion::prelude::SessionContext;
 use datafusion_catalog::MemTable;
+use datafusion_common::metadata::ScalarAndMetadata;
+use datafusion_common::{ParamValues, ScalarValue};
 use datafusion_physical_plan::ExecutionPlan;
 use datafusion_physical_plan::displayable;
-use datafusion_physical_plan::execution_plan::prepare_execution;
 use datafusion_physical_plan::execution_plan::reset_plan_states;
+use datafusion_physical_plan::reuse::ReusableExecutionPlan;
 use tokio::runtime::Runtime;
 
 const NUM_FIELDS: usize = 1000;
@@ -38,6 +42,44 @@ static SCHEMA: LazyLock<SchemaRef> = LazyLock::new(|| {
     ))
 });
 
+/// Decides when to generate placeholders, helping to form a query
+/// with a certain placeholders percent.
+struct PlaceholderCounter {
+    placeholders_percent: usize,
+    c: usize,
+    placeholder_idx: usize,
+    num_placeholders: usize,
+}
+
+impl PlaceholderCounter {
+    fn new(placeholders_percent: usize) -> Self {
+        Self {
+            placeholders_percent,
+            c: 0,
+            placeholder_idx: 0,
+            num_placeholders: 0,
+        }
+    }
+
+    fn placeholder(&mut self) -> Option<String> {
+        let is_placeholder = self.c < self.placeholders_percent;
+        self.c += 1;
+        if self.c >= 100 {
+            self.c = 0;
+        }
+        if is_placeholder {
+            self.num_placeholders += 1;
+            Some("$1".to_owned())
+        } else {
+            None
+        }
+    }
+
+    fn placeholder_or(&mut self, f: impl FnOnce() -> String) -> String {
+        self.placeholder().unwrap_or_else(f)
+    }
+}
+
 fn col_name(i: usize) -> String {
     format!("x_{i}")
 }
@@ -48,7 +90,7 @@ fn aggr_name(i: usize) -> String {
 
 fn physical_plan(
     ctx: &SessionContext,
-    rt: &Runtime,
+    rt: &tokio::runtime::Handle,
     sql: &str,
 ) -> Arc<dyn ExecutionPlan> {
     rt.block_on(async {
@@ -61,15 +103,16 @@ fn physical_plan(
     })
 }
 
-fn predicate(col_name: impl Fn(usize) -> String, len: usize) -> String {
+fn predicate(mut comparee: impl FnMut(usize) -> (String, String), len: usize) -> String {
     let mut predicate = String::new();
     for i in 0..len {
         if i > 0 {
             predicate.push_str(" AND ");
         }
-        predicate.push_str(&col_name(i));
+        let (lhs, rhs) = comparee(i);
+        predicate.push_str(&lhs);
         predicate.push_str(" = ");
-        predicate.push_str(&i.to_string());
+        predicate.push_str(&rhs);
     }
     predicate
 }
@@ -84,7 +127,8 @@ fn predicate(col_name: impl Fn(usize) -> String, len: usize) -> String {
 ///
 /// Where `p1` and `p2` some long predicates.
 ///
-fn query1() -> String {
+fn query0(placeholders_percent: usize) -> (String, usize) {
+    let mut plc = PlaceholderCounter::new(placeholders_percent);
     let mut query = String::new();
     query.push_str("SELECT ");
     for i in 0..NUM_FIELDS {
@@ -92,15 +136,37 @@ fn query1() -> String {
             query.push_str(", ");
         }
         query.push_str("AVG(");
-        query.push_str(&col_name(i));
+
+        if let Some(placeholder) = plc.placeholder() {
+            query.push_str(&format!("{}+{}", placeholder, col_name(i)));
+        } else {
+            query.push_str(&col_name(i));
+        }
+
         query.push_str(") AS ");
         query.push_str(&aggr_name(i));
     }
     query.push_str(" FROM t WHERE ");
-    query.push_str(&predicate(col_name, PREDICATE_LEN));
+    query.push_str(&predicate(
+        |i| {
+            (
+                plc.placeholder_or(|| col_name(i)),
+                plc.placeholder_or(|| col_name(i + 1)),
+            )
+        },
+        PREDICATE_LEN,
+    ));
     query.push_str(" HAVING ");
-    query.push_str(&predicate(aggr_name, PREDICATE_LEN));
-    query
+    query.push_str(&predicate(
+        |i| {
+            (
+                plc.placeholder_or(|| aggr_name(i)),
+                plc.placeholder_or(|| aggr_name(i + 1)),
+            )
+        },
+        PREDICATE_LEN,
+    ));
+    (query, plc.num_placeholders)
 }
 
 /// Returns a typical plan for the query like:
@@ -110,27 +176,35 @@ fn query1() -> String {
 /// WHERE p1
 /// ```
 ///
-fn query2() -> String {
+fn query1(placeholders_percent: usize) -> (String, usize) {
+    let mut plc = PlaceholderCounter::new(placeholders_percent);
     let mut query = String::new();
     query.push_str("SELECT ");
     for i in (0..NUM_FIELDS).step_by(2) {
         if i > 0 {
             query.push_str(", ");
         }
-        if (i / 2) % 2 == 0 {
-            query.push_str(&format!("t.{}", col_name(i)));
+        let col = if (i / 2) % 2 == 0 {
+            format!("t.{}", col_name(i))
         } else {
-            query.push_str(&format!("v.{}", col_name(i)));
-        }
+            format!("v.{}", col_name(i))
+        };
+        let add = plc.placeholder_or(|| "1".to_owned());
+        let proj = format!("{col} + {add}");
+        query.push_str(&proj);
     }
     query.push_str(" FROM t JOIN v ON t.x_0 = v.x_0 WHERE ");
 
-    fn qualified_name(i: usize) -> String {
-        format!("t.{}", col_name(i))
-    }
-
-    query.push_str(&predicate(qualified_name, PREDICATE_LEN));
-    query
+    query.push_str(&predicate(
+        |i| {
+            (
+                plc.placeholder_or(|| format!("t.{}", col_name(i))),
+                plc.placeholder_or(|| i.to_string()),
+            )
+        },
+        PREDICATE_LEN,
+    ));
+    (query, plc.num_placeholders)
 }
 
 /// Returns a typical plan for the query like:
@@ -140,7 +214,8 @@ fn query2() -> String {
 /// WHERE p
 /// ```
 ///
-fn query3() -> String {
+fn query2(placeholders_percent: usize) -> (String, usize) {
+    let mut plc = PlaceholderCounter::new(placeholders_percent);
     let mut query = String::new();
     query.push_str("SELECT ");
 
@@ -151,87 +226,103 @@ fn query3() -> String {
         }
         query.push_str(&col_name(i * 2));
         query.push_str(" + ");
-        query.push_str(&col_name(i * 2 + 1));
+        query.push_str(&plc.placeholder_or(|| col_name(i * 2 + 1)));
     }
 
     query.push_str(" FROM t WHERE ");
-    query.push_str(&predicate(col_name, PREDICATE_LEN));
-    query
+    query.push_str(&predicate(
+        |i| {
+            (
+                plc.placeholder_or(|| col_name(i)),
+                plc.placeholder_or(|| i.to_string()),
+            )
+        },
+        PREDICATE_LEN,
+    ));
+    (query, plc.num_placeholders)
 }
 
-fn run_reset_states(b: &mut criterion::Bencher, plan: &Arc<dyn ExecutionPlan>) {
-    b.iter(|| std::hint::black_box(reset_plan_states(Arc::clone(plan)).unwrap()));
+fn init() -> (SessionContext, Runtime) {
+    let rt = Runtime::new().unwrap();
+    let ctx = SessionContext::new();
+    ctx.register_table(
+        "t",
+        Arc::new(MemTable::try_new(Arc::clone(&SCHEMA), vec![vec![], vec![]]).unwrap()),
+    )
+    .unwrap();
+
+    ctx.register_table(
+        "v",
+        Arc::new(MemTable::try_new(Arc::clone(&SCHEMA), vec![vec![], vec![]]).unwrap()),
+    )
+    .unwrap();
+    (ctx, rt)
 }
 
 /// Benchmark is intended to measure overhead of actions, required to perform
 /// making an independent instance of the execution plan to re-execute it, avoiding
 /// re-planning stage.
-fn bench_reset_plan_states(c: &mut Criterion) {
+fn bench_reset(
+    g: &mut criterion::BenchmarkGroup<'_, WallTime>,
+    query_fn: impl FnOnce() -> String,
+) {
+    let (ctx, rt) = init();
+    let query = query_fn();
+    let rt = rt.handle();
+    let plan: OnceCell<Arc<dyn ExecutionPlan>> = OnceCell::new();
+    g.bench_function("reset", |b| {
+        let plan = plan.get_or_init(|| {
+            log::info!("sql:\n{}\n\n", query);
+            let plan = physical_plan(&ctx, rt, &query);
+            log::info!("plan:\n{}", displayable(plan.as_ref()).indent(true));
+            plan
+        });
+        b.iter(|| std::hint::black_box(reset_plan_states(Arc::clone(&plan)).unwrap()))
+    });
+}
+
+/// The same as [`bench_reset`] for placeholdered plans.
+/// `placeholders_percent` is a percent of placeholders that must be used in generated queries.
+fn bench_bind(
+    g: &mut criterion::BenchmarkGroup<'_, WallTime>,
+    placeholders_percent: usize,
+    query_fn: impl FnOnce(usize) -> (String, usize),
+) {
+    let (ctx, rt) = init();
+    let params = ParamValues::List(vec![ScalarAndMetadata::new(
+        ScalarValue::Int64(Some(42)),
+        None,
+    )]);
+    let (query, num_placeholders) = query_fn(placeholders_percent);
+    let rt = rt.handle();
+    let plan: OnceCell<ReusableExecutionPlan> = OnceCell::new();
+    g.bench_function(format!("{num_placeholders}_placeholders"), move |b| {
+        let plan = plan.get_or_init(|| {
+            log::info!("sql:\n{}\n\n", query);
+            let plan = physical_plan(&ctx, rt, &query);
+            log::info!("plan:\n{}", displayable(plan.as_ref()).indent(true));
+            plan.into()
+        });
+        b.iter(|| std::hint::black_box(plan.bind(Some(&params))))
+    });
+}
+
+fn criterion_benchmark(c: &mut Criterion) {
     env_logger::init();
 
-    let rt = Runtime::new().unwrap();
-    let ctx = SessionContext::new();
-    ctx.register_table(
-        "t",
-        Arc::new(MemTable::try_new(Arc::clone(&SCHEMA), vec![vec![], vec![]]).unwrap()),
-    )
-    .unwrap();
-
-    ctx.register_table(
-        "v",
-        Arc::new(MemTable::try_new(Arc::clone(&SCHEMA), vec![vec![], vec![]]).unwrap()),
-    )
-    .unwrap();
-
-    macro_rules! bench_query {
-        ($query_producer: expr) => {{
-            let sql = $query_producer();
-            let plan = physical_plan(&ctx, &rt, &sql);
-            log::debug!("plan:\n{}", displayable(plan.as_ref()).indent(true));
-            move |b| run_reset_states(b, &plan)
-        }};
+    for (query_idx, query_fn) in [query0, query1, query2].iter().enumerate() {
+        {
+            let mut g = c.benchmark_group(format!("reset_query{query_idx}"));
+            bench_reset(&mut g, || query_fn(0).0);
+        }
+        {
+            let mut g = c.benchmark_group(format!("bind_query{query_idx}"));
+            for placeholders_percent in [0, 1, 10, 50, 100] {
+                bench_bind(&mut g, placeholders_percent, query_fn);
+            }
+        }
     }
-
-    c.bench_function("query1", bench_query!(query1));
-    c.bench_function("query2", bench_query!(query2));
-    c.bench_function("query3", bench_query!(query3));
 }
 
-fn run_prepare_execution(b: &mut criterion::Bencher, plan: &Arc<dyn ExecutionPlan>) {
-    b.iter(|| std::hint::black_box(prepare_execution(Arc::clone(plan), None).unwrap()));
-}
-
-/// Benchmark is intended to measure overhead of actions, required to perform
-/// making an independent instance of the execution plan to re-execute it with placeholders,
-/// avoiding re-planning stage.
-fn bench_prepare_execution(c: &mut Criterion) {
-    let rt = Runtime::new().unwrap();
-    let ctx = SessionContext::new();
-    ctx.register_table(
-        "t",
-        Arc::new(MemTable::try_new(Arc::clone(&SCHEMA), vec![vec![], vec![]]).unwrap()),
-    )
-    .unwrap();
-
-    ctx.register_table(
-        "v",
-        Arc::new(MemTable::try_new(Arc::clone(&SCHEMA), vec![vec![], vec![]]).unwrap()),
-    )
-    .unwrap();
-
-    macro_rules! bench_query {
-        ($query_producer: expr) => {{
-            let sql = $query_producer();
-            let plan = physical_plan(&ctx, &rt, &sql);
-            log::debug!("plan:\n{}", displayable(plan.as_ref()).indent(true));
-            move |b| run_prepare_execution(b, &plan)
-        }};
-    }
-
-    c.bench_function("query1", bench_query!(query1));
-    c.bench_function("query2", bench_query!(query2));
-    c.bench_function("query3", bench_query!(query3));
-}
-
-criterion_group!(benches, bench_reset_plan_states, bench_prepare_execution);
+criterion_group!(benches, criterion_benchmark);
 criterion_main!(benches);
