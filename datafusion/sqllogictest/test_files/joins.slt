@@ -4046,8 +4046,8 @@ logical_plan
 10)--------------Filter: exchange_rates.currency_to = Utf8View("USD")
 11)----------------TableScan: exchange_rates projection=[ts, currency_from, currency_to, rate]
 physical_plan
-01)SortExec: expr=[sn@1 ASC NULLS LAST], preserve_partitioning=[false]
-02)--ProjectionExec: expr=[ts@1 as ts, sn@0 as sn, amount@2 as amount, currency@3 as currency, CAST(amount@2 AS Float32) * last_value(e.rate)@4 as amount_usd]
+01)ProjectionExec: expr=[ts@1 as ts, sn@0 as sn, amount@2 as amount, currency@3 as currency, CAST(amount@2 AS Float32) * last_value(e.rate)@4 as amount_usd]
+02)--SortExec: expr=[sn@0 ASC NULLS LAST], preserve_partitioning=[false]
 03)----AggregateExec: mode=Single, gby=[sn@1 as sn, ts@0 as ts, amount@2 as amount, currency@3 as currency], aggr=[last_value(e.rate)]
 04)------HashJoinExec: mode=CollectLeft, join_type=Inner, on=[(currency@3, currency_from@1)], filter=ts@0 >= ts@1, projection=[ts@0, sn@1, amount@2, currency@3, rate@6]
 05)--------DataSourceExec: partitions=1, partition_sizes=[0]
@@ -5075,7 +5075,7 @@ LEFT ANTI JOIN (
 ) t2 ON t1.k = t2.k;
 ----
 Plan with Metrics
-01)HashJoinExec: mode=CollectLeft, join_type=RightAnti, on=[(k@0, k@0)], metrics=[output_rows=2, elapsed_compute=<slt:ignore>, output_bytes=<slt:ignore>, output_batches=1, array_map_created_count=0, build_input_batches=0, build_input_rows=0, input_batches=1, input_rows=2, build_mem_used=<slt:ignore>, build_time=<slt:ignore>, join_time=<slt:ignore>, avg_fanout=N/A (0/0), probe_hit_rate=0% (0/2)]     
+01)HashJoinExec: mode=CollectLeft, join_type=RightAnti, on=[(k@0, k@0)], metrics=[output_rows=2, elapsed_compute=<slt:ignore>, output_bytes=<slt:ignore>, output_batches=1, array_map_created_count=0, build_input_batches=0, build_input_rows=0, input_batches=1, input_rows=2, build_mem_used=<slt:ignore>, build_time=<slt:ignore>, join_time=<slt:ignore>, avg_fanout=N/A (0/0), probe_hit_rate=0% (0/2)]
 02)--ProjectionExec: expr=[column1@0 as k], metrics=[output_rows=0, elapsed_compute=<slt:ignore>, output_bytes=<slt:ignore>, output_batches=0, expr_0_eval_time=<slt:ignore>]
 03)----FilterExec: column1@0 != 1, metrics=[output_rows=0, elapsed_compute=<slt:ignore>, output_bytes=<slt:ignore>, output_batches=0, selectivity=0% (0/1)]
 04)------DataSourceExec: partitions=1, partition_sizes=[1], metrics=[]
@@ -5292,10 +5292,10 @@ LEFT JOIN issue_19067_right r ON l.join_key = r.join_key
 ORDER BY l.id;
 ----
 physical_plan
-01)SortExec: expr=[id@0 ASC NULLS LAST], preserve_partitioning=[false]
-02)--ProjectionExec: expr=[id@2 as id, join_key@3 as left_key, join_key@0 as right_key, value@1 as value]
-03)----HashJoinExec: mode=CollectLeft, join_type=Right, on=[(join_key@0, join_key@1)]
-04)------DataSourceExec: partitions=1, partition_sizes=[1]
+01)ProjectionExec: expr=[id@2 as id, join_key@3 as left_key, join_key@0 as right_key, value@1 as value]
+02)--HashJoinExec: mode=CollectLeft, join_type=Right, on=[(join_key@0, join_key@1)]
+03)----DataSourceExec: partitions=1, partition_sizes=[1]
+04)----SortExec: expr=[id@0 ASC NULLS LAST], preserve_partitioning=[false]
 05)------DataSourceExec: partitions=1, partition_sizes=[1]
 
 statement count 0
@@ -5363,7 +5363,7 @@ statement count 0
 DROP TABLE issue_20437_large;
 
 # Test count(*) with right semi/anti joins returns correct row counts
-# issue: https://github.com/apache/datafusion/issues/20669 
+# issue: https://github.com/apache/datafusion/issues/20669
 
 statement ok
 CREATE TABLE t1 (k INT, v INT);
