@@ -29,7 +29,8 @@ use crate::error::{DataFusionError, Result};
 use crate::execution::context::{ExecutionProps, SessionState};
 use crate::logical_expr::utils::generate_sort_key;
 use crate::logical_expr::{
-    Aggregate, EmptyRelation, Join, Projection, Sort, TableScan, Unnest, Values, Window,
+    Aggregate, EmptyRelation, Join, Limit, Projection, Sort, TableScan, Unnest, Values,
+    Window,
 };
 use crate::logical_expr::{
     Expr, LogicalPlan, Partitioning as LogicalPartitioning, PlanType, Repartition,
@@ -85,12 +86,14 @@ use datafusion_expr::expr::{
 };
 use datafusion_expr::expr_rewriter::unnormalize_cols;
 use datafusion_expr::logical_plan::builder::wrap_projection_for_join_if_necessary;
+use datafusion_expr::simplify::SimplifyContext;
 use datafusion_expr::utils::{expr_to_columns, split_conjunction};
 use datafusion_expr::{
     Analyze, BinaryExpr, DescribeTable, DmlStatement, Explain, ExplainFormat, Extension,
     FetchType, Filter, JoinType, Operator, RecursiveQuery, SkipType, StringifiedPlan,
     WindowFrame, WindowFrameBound, WriteOp,
 };
+use datafusion_optimizer::simplify_expressions::ExprSimplifier;
 use datafusion_physical_expr::aggregate::{AggregateExprBuilder, AggregateFunctionExpr};
 use datafusion_physical_expr::expressions::Literal;
 use datafusion_physical_expr::{
@@ -1202,6 +1205,25 @@ impl DefaultPhysicalPlanner {
             LogicalPlan::Subquery(_) => todo!(),
             LogicalPlan::SubqueryAlias(_) => children.one()?,
             LogicalPlan::Limit(limit) => {
+                // Try to evaluate skip and fetch expressions.
+                let simplifier = ExprSimplifier::new(SimplifyContext::default());
+
+                let skip = match &limit.skip {
+                    Some(expr) => Some(Box::new(simplifier.simplify(*expr.clone())?)),
+                    None => None,
+                };
+
+                let fetch = match &limit.fetch {
+                    Some(expr) => Some(Box::new(simplifier.simplify(*expr.clone())?)),
+                    None => None,
+                };
+
+                let limit = Limit {
+                    input: Arc::clone(&limit.input),
+                    skip,
+                    fetch,
+                };
+
                 let input = children.one()?;
                 let SkipType::Literal(skip) = limit.get_skip_type()? else {
                     return not_impl_err!(

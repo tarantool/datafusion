@@ -3281,7 +3281,8 @@ pub struct Limit {
 pub enum SkipType {
     /// The skip expression is a literal value.
     Literal(usize),
-    /// Currently only supports expressions that can be folded into constants.
+    /// Currently supports all expressions that can be evaluated.
+    /// UnsupportedExpr means that the expression is not considered by the analyzer/optimizer.
     UnsupportedExpr,
 }
 
