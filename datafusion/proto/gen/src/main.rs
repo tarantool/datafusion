@@ -31,7 +31,10 @@ fn main() -> Result<(), String> {
         .compile_well_known_types()
         .protoc_arg("--experimental_allow_proto3_optional")
         .extern_path(".google.protobuf", "::pbjson_types")
-        .compile_protos(&[proto_path], &["proto"])
+        .compile_protos(
+            &[proto_path],
+            &["datafusion/proto/proto", "datafusion/proto-common/proto"],
+        )
         .map_err(|e| format!("protobuf compilation failed: {e}"))?;
 
     let descriptor_set = std::fs::read(&descriptor_path)
