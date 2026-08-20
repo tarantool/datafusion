@@ -1238,20 +1238,26 @@ impl DefaultPhysicalPlanner {
                     );
                 };
 
-                // GlobalLimitExec requires a single partition for input
-                let input = if input.output_partitioning().partition_count() == 1 {
-                    input
-                } else {
-                    // Apply a LocalLimitExec to each partition. The optimizer will also insert
-                    // a CoalescePartitionsExec between the GlobalLimitExec and LocalLimitExec
-                    if let Some(fetch) = fetch {
-                        Arc::new(LocalLimitExec::new(input, fetch + skip))
-                    } else {
-                        input
+                match fetch {
+                    Some(0) => {
+                        // Return an empty exec node if the number of requested rows is 0
+                        Arc::new(EmptyExec::new(input.schema()))
                     }
-                };
+                    Some(fetch) => {
+                        // GlobalLimitExec requires a single partition for input
+                        let input = if input.output_partitioning().partition_count() == 1
+                        {
+                            input
+                        } else {
+                            // Apply a LocalLimitExec to each partition. The optimizer will also insert
+                            // a CoalescePartitionsExec between the GlobalLimitExec and LocalLimitExec
+                            Arc::new(LocalLimitExec::new(input, fetch + skip))
+                        };
 
-                Arc::new(GlobalLimitExec::new(input, skip, fetch))
+                        Arc::new(GlobalLimitExec::new(input, skip, Some(fetch)))
+                    }
+                    None => Arc::new(GlobalLimitExec::new(input, skip, None)),
+                }
             }
             LogicalPlan::Unnest(Unnest {
                 list_type_columns,
