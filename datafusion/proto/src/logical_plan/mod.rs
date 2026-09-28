@@ -104,22 +104,22 @@ pub trait AsLogicalPlan: Debug + Send + Sync + Clone {
         Self: Sized;
 }
 
-// In debug builds, keep each serializer arm's local temporaries out of the
+// In debug builds, keep each [de]serializer arm's local temporaries out of the
 // recursive dispatcher frame. Without this call boundary, they inflate the
 // frame of every recursive invocation.
 #[cfg_attr(debug_assertions, inline(never))]
-fn serialize_logical_plan_arm<F>(serializer: F) -> Result<LogicalPlanNode>
+fn serde_logical_plan_arm<F, T>(f: F) -> Result<T>
 where
-    F: FnOnce() -> Result<LogicalPlanNode>,
+    F: FnOnce() -> Result<T>,
 {
-    serializer()
+    f()
 }
 
 macro_rules! dispatch_logical_plan {
     ($plan:expr, { $($pattern:pat => $body:expr $(,)?)+ }) => {
         match $plan {
             $(
-                $pattern => serialize_logical_plan_arm(|| -> Result<LogicalPlanNode> {
+                $pattern => serde_logical_plan_arm(|| {
                     $body
                 }),
             )+
@@ -406,6 +406,7 @@ impl AsLogicalPlan for LogicalPlanNode {
             .map_err(|e| internal_datafusion_err!("failed to encode logical plan: {e:?}"))
     }
 
+    #[cfg_attr(feature = "recursive_protection", recursive::recursive)]
     fn try_into_logical_plan(
         &self,
         ctx: &TaskContext,
@@ -416,7 +417,7 @@ impl AsLogicalPlan for LogicalPlanNode {
                 "logical_plan::from_proto() Unsupported logical plan '{self:?}'"
             ))
         })?;
-        match plan {
+        dispatch_logical_plan!(plan, {
             LogicalPlanType::Values(values) => {
                 let n_cols = values.n_cols as usize;
                 let values: Vec<Vec<Expr>> = if values.values_list.is_empty() {
@@ -1107,7 +1108,7 @@ impl AsLogicalPlan for LogicalPlanNode {
                     Arc::new(into_logical_plan!(dml_node.input, ctx, extension_codec)?),
                 )))
             }
-        }
+        })
     }
 
     #[cfg_attr(feature = "recursive_protection", recursive::recursive)]
